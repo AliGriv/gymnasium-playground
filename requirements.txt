@@ -1,0 +1,6 @@
+gymnasium
+gymnasium[toy-text]
+matplotlib
+tqdm
+numpy
+click
