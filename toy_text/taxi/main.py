@@ -54,6 +54,8 @@ def run(
         terminated_per_episode = []
         truncated_per_episode = []
         reward = 0
+        if not is_train:
+            agent.epsilon = 0.0
         for episode in tqdm(range(num_episodes), desc="Episodes", leave=False):
             obs, info = env.reset()
             done = False
@@ -70,7 +72,8 @@ def run(
                 obs = next_obs
                 rewards += reward
 
-            agent.decay_epsilon()
+            if is_train:
+                agent.decay_epsilon()
             if(agent.epsilon==0):
                 agent.lr = 0.0001
 
@@ -92,11 +95,7 @@ def run(
         train_stats = run_episodes(num_episodes=episodes)
 
     if test:
-        agent.epsilon = 0.0
-        if train:
-            num_episodes = 1
-        else:
-            num_episodes = episodes
+        num_episodes = 1 if train else episodes
         test_stats = run_episodes(num_episodes=num_episodes, is_train=False)
         r = test_stats['rewards']
         te = test_stats['terminated']

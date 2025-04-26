@@ -76,3 +76,7 @@ gym-playground toy-text taxi --train --model-save-path model/taxi --episodes 150
 gym-playground toy-text taxi --test --model-load-path model/taxi.pkl --episodes 2 --render 
 ```
 
+### Blackjack
+
+- Documentation is [here](https://gymnasium.farama.org/environments/toy_text/blackjack/).
+- Same arguments as [Taxi](#taxi). Except it has `--epsilon-min` which is by default on `0.05`.
