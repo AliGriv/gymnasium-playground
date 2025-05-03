@@ -45,6 +45,7 @@ class FrozenLakeMaps:
                 raise TypeError(f"Map grid must be a list of strings for map ID {map_id}")
         
         filepath = Path(filepath)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
         try:
             if compress:
                 if not str(filepath).endswith(".gz"):

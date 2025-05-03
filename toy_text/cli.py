@@ -1,6 +1,7 @@
 import click
 from toy_text.taxi.main import run as run_taxi
 from toy_text.blackjack.main import run as run_blackjack
+from toy_text.frozenLake.frozenLakeMaps import FrozenLakeMaps
 
 @click.group()
 def cli():
@@ -126,3 +127,18 @@ def blackjack(train, test, model_save_path, model_load_path, render, learning_ra
         model_load_path=model_load_path,
         plot=plot
     )
+
+
+@cli.command()
+@click.option('--num-maps', default=1000, type=int, help='Number of maps to generate')
+@click.option('--maps-save-path', type=str, default='datasets/toy_text/frozenlake.json', help="Path to store the maps dataset as json file")
+@click.option('--size', type=int, default=8, help='Size of the map, default is 8, meaning 8x8')
+@click.option('--compress', is_flag=True, help='Compress the maps before storing to file')
+def frozen_lake(num_maps, maps_save_path, size, compress):
+
+    dataset = FrozenLakeMaps.generate_dataset(num_maps=num_maps,
+                                              size=size,
+                                              filepath=maps_save_path,
+                                              compress=compress)
+    
+    print(f"Number of maps generated {len(dataset)}.")
