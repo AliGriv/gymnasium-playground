@@ -3,6 +3,11 @@ from torch import nn
 import torch.nn.functional as F
 from typing import List
 
+"""
+Disclaimer: This code is heavily inspired by https://github.com/johnnycode8/dqn_pytorch/blob/main/dqn.py
+Thanks JognnyCode8!
+"""
+
 class DQN(nn.Module):
     """
     @class DQN
