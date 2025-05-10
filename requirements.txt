@@ -4,3 +4,7 @@ matplotlib
 tqdm
 numpy
 click
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+torchvision
+torchaudio
