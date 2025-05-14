@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import torch.nn.init as init
 import torch.nn.functional as F
 from typing import List
 
@@ -49,6 +50,17 @@ class DQN(nn.Module):
             self.hidden_layers = self._get_hidden_layers(self.hidden_dims)
             self.output = nn.Linear(self.hidden_dims[-1], action_dim)
 
+        # Apply He init to **every** Linear layer in this module
+        self.apply(self._init_weights)
+
+    @staticmethod
+    def _init_weights(m):
+        if isinstance(m, nn.Linear):
+            # Kaiming uniform is one common "He" init; adjust nonlinearity if you change activation
+            init.kaiming_uniform_(m.weight, nonlinearity='relu')
+            if m.bias is not None:
+                init.zeros_(m.bias)
+
     def _get_hidden_layers(self, hidden_dims: List[int]) -> List[nn.Linear]:
         """
         @brief Creates a list of fully connected layers for the given hidden dimensions.
@@ -86,8 +98,6 @@ class DQN(nn.Module):
             A = self.advantages(a)
 
             # Calc Q
-            # print("V shape:", V.shape)
-            # print("A shape:", A.shape)
             Q = V + A - torch.mean(A, dim=1, keepdim=True)
 
         else:
@@ -102,7 +112,7 @@ class DQN(nn.Module):
         @brief Returns a formatted string summarizing the network configuration.
         """
         info = f"DQN(\n"
-        info += f"  input_dim={self.fc1.in_features},\n"
+        info += f"  input_dim={self.fc1},\n"
         info += f"  hidden_dims={self.hidden_dims},\n"
         info += f"  dueling_dqn={self.enable_dueling_dqn},\n"
 
@@ -113,6 +123,7 @@ class DQN(nn.Module):
             info += f"  Advantage Hidden layers: {self.adv_layers}\n"
         else:
             info += f"  Hidden layers: {self.hidden_layers}\n"
+            info += f"  output={self.output},\n"
         info += ")"
         return info
 

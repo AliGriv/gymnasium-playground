@@ -2,6 +2,7 @@ import click
 from toy_text.taxi.main import run as run_taxi
 from toy_text.blackjack.main import run as run_blackjack
 from toy_text.frozenLake.frozenLakeMaps import FrozenLakeMaps
+from toy_text.frozenLake.main import run as run_frozenlake
 
 @click.group()
 def cli():
@@ -130,15 +131,77 @@ def blackjack(train, test, model_save_path, model_load_path, render, learning_ra
 
 
 @cli.command()
-@click.option('--num-maps', default=1000, type=int, help='Number of maps to generate')
-@click.option('--maps-save-path', type=str, default='datasets/toy_text/frozenlake.json', help="Path to store the maps dataset as json file")
-@click.option('--size', type=int, default=8, help='Size of the map, default is 8, meaning 8x8')
-@click.option('--compress', is_flag=True, help='Compress the maps before storing to file')
-def frozen_lake(num_maps, maps_save_path, size, compress):
+@click.option('--num-maps', default=1000, type=int,
+              help='Number of maps to generate')
+@click.option('--maps-save-path', default='datasets/toy_text/frozenlake.json', type=str,
+              help="Where to store the maps dataset as JSON")
+@click.option('--size', default=8, type=int,
+              help='Map size (e.g. 8 for 8×8)')
+@click.option('--compress', is_flag=True,
+              help='Compress the JSON file')
+@click.option('--train/--no-train', default=True,
+              help='Whether to train on these maps')
+@click.option('--test/--no-test', default=False,
+              help='Whether to evaluate on held-out maps')
+@click.option('--episodes', default=1000, type=int,
+              help='Episodes per map')
+@click.option('--render', is_flag=True,
+              help='Render the environment to screen')
+@click.option('--learning-rate', default=1e-3, type=float,
+              help='DQN learning rate')
+@click.option('--start-epsilon', default=1.0, type=float,
+              help='Initial ϵ-greedy value')
+@click.option('--final-epsilon', default=0.05, type=float,
+              help='Final ϵ after decay')
+@click.option('--test-size', default=0.2, type=float,
+              help='Fraction of maps held out for testing')
+@click.option('--model-save-path', type=str, default=None,
+              help='Where to checkpoint trained model')
+@click.option('--model-load-path', type=str, default=None,
+              help='Path to an existing model to load')
+@click.option('--no-plot', 'plot', flag_value=False, default=True,
+              help='Disable plotting of training curves')
+def frozen_lake(num_maps: int,
+                maps_save_path: str,
+                size: int,
+                compress: bool,
+                train: bool,
+                test: bool,
+                episodes: int,
+                render: bool,
+                learning_rate: float,
+                start_epsilon: float,
+                final_epsilon: float,
+                test_size: float,
+                model_save_path: str,
+                model_load_path: str,
+                plot: bool):
+    """
+    Generate FrozenLake maps, then train and/or test a DQN agent.
+    """
 
-    dataset = FrozenLakeMaps.generate_dataset(num_maps=num_maps,
-                                              size=size,
-                                              filepath=maps_save_path,
-                                              compress=compress)
+    dataset = FrozenLakeMaps.generate_dataset(
+        num_maps=num_maps,
+        size=size,
+        filepath=maps_save_path,
+        compress=compress
+    )
+    print(f"Generated {len(dataset)} maps → {maps_save_path}")
     
-    print(f"Number of maps generated {len(dataset)}.")
+    # TODO: Load existing maps 
+
+    
+    run_frozenlake(
+        train=train,
+        test=test,
+        dataset=dataset,
+        episodes=episodes,
+        render=render,
+        learning_rate=learning_rate,
+        start_epsilon=start_epsilon,
+        final_epsilon=final_epsilon,
+        test_size=test_size,
+        model_save_path=model_save_path,
+        model_load_path=model_load_path,
+        plot=plot
+    )
