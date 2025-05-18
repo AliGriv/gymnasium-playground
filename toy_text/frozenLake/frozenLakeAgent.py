@@ -15,10 +15,8 @@ from torch.nn import Module
 from common.dqn import DQN
 from common.replayMemory import ReplayMemory
 from toy_text.utils import get_moving_avgs
+from common.loggerConfig import logger
 
-
-# For printing date and time
-DATE_FORMAT = "%y-%m-%d %H:%M:%S"
 
 def set_seed(seed: int = 2025, use_cuda: bool = False):
     """
@@ -134,7 +132,7 @@ class FrozenLakeAgent:
             existing_dqn_path = Path(existing_dqn_path)
         if existing_dqn_path and existing_dqn_path.exists():
             self.q_net.load_state_dict(torch.load(existing_dqn_path))
-            print(f"Loaded existing DQN from {existing_dqn_path}")
+            logger.info(f"Loaded existing DQN from {existing_dqn_path}")
 
         self.log_file = Path(log_directory) / 'frozenLake.log'
         self.graph_file = Path(log_directory) / 'frozenLake.png'
@@ -167,7 +165,7 @@ class FrozenLakeAgent:
 
     def sync_target_network(self):
         # TODO: Add doxygen
-        print(f"  [Sync] {datetime.now().strftime(DATE_FORMAT)} – target network updated")
+        logger.debug(f"  [Sync] – target network updated")
         self.target_net.load_state_dict(self.q_net.state_dict())
 
     def run(self, num_episodes: Optional[int]=None, is_training: bool = True, render: bool = False):
@@ -182,15 +180,14 @@ class FrozenLakeAgent:
             start_time = datetime.now()
             last_graph_update_time = start_time
 
-            log_message = f"{start_time.strftime(DATE_FORMAT)}: Training starting..."
-            print(log_message)
+            log_message = f"Training starting..."
+            logger.info(log_message)
             with open(self.log_file, 'w') as file:
                 file.write(log_message + '\n')
-            print(f"[Train Start] {datetime.now().strftime(DATE_FORMAT)} – "
+            logger.info(f"[Train Start]– "
                 f"{num_episodes or '∞'} episodes, lr={self.lr}, γ={self.discount_factor}, "
                 f"dueling={self.enable_dqn_dueling}, double={self.enable_dqn_double}")
 
-        print(self.maps)
         desc = self.maps["0"] # TODO
         self.env = gym.make('FrozenLake-v1',
                        desc=desc,
@@ -217,7 +214,7 @@ class FrozenLakeAgent:
             # Track best reward
             best_reward = -9999999
         else:
-            print(f"Putting model in evaluation mode")
+            logger.info(f"Putting model in evaluation mode")
             self.q_net.eval()
 
 
@@ -226,7 +223,7 @@ class FrozenLakeAgent:
         for episode in itertools.count():
             self.episode_history.clear()
             episode_memory = ReplayMemory(1000)
-            print(f"[Episode {episode:4d}] starting, ε={self.epsilon:.3f}")
+            logger.debug(f"[Episode {episode:4d}] starting, ε={self.epsilon:.3f}")
             if num_episodes and episode > num_episodes:
                 break
             obs, info = self.env.reset()
@@ -245,7 +242,7 @@ class FrozenLakeAgent:
                 reward = self.override_reward(obs, new_obs, reward, terminated)
 
                 if not is_training:
-                    print(f"  [Episode {episode:4d}] action={action}, obs={obs}, new_obs={new_obs}, reward={reward:.2f}, terminated={terminated}")
+                    logger.debug(f"  [Episode {episode:4d}] action={action}, obs={obs}, new_obs={new_obs}, reward={reward:.2f}, terminated={terminated}")
                 episode_reward += reward
 
                 next_state = self.get_state(new_obs, desc)
@@ -260,7 +257,7 @@ class FrozenLakeAgent:
                     step_count+=1
                     super_step_count += 1
                     if super_step_count % 1000 == 0:
-                        print(f"  [Step {super_step_count:6d}] memory size={len(self.memory)}")
+                        logger.debug(f"  [Step {super_step_count:6d}] memory size={len(self.memory)}")
 
 
                 state = next_state
@@ -271,7 +268,7 @@ class FrozenLakeAgent:
             avg100 = np.mean(rewards_per_episode[-100:]) if len(rewards_per_episode) >= 100 else float('nan')
             i = new_obs // self.size
             j = new_obs % self.size
-            print(f"[Episode {episode:4d}] reward={episode_reward:.2f}, avg100={avg100:.2f}, ε={self.epsilon:.3f}, final location=({i}, {j}), terminated={terminated}, truncated={truncated}")
+            logger.debug(f"[Episode {episode:4d}] reward={episode_reward:.2f}, avg100={avg100:.2f}, ε={self.epsilon:.3f}, final location=({i}, {j}), terminated={terminated}, truncated={truncated}")
             if is_training and new_obs == (self.size**2 - 1):
                 self.memory.push_success(episode_memory.states, episode_memory.actions, episode_memory.next_states, episode_memory.rewards, episode_memory.terminated)
                 episode_memory.clear()
@@ -283,8 +280,8 @@ class FrozenLakeAgent:
                     torch.save(self.q_net.state_dict(), self.save_path)
                 if episode_reward > best_reward:
                     if best_reward:
-                        log_message = f"{datetime.now().strftime(DATE_FORMAT)}: New best reward {episode_reward:0.1f} ({(episode_reward-best_reward)/best_reward*100:+.1f}%) at episode {episode}, saving model..."
-                        print(log_message)
+                        log_message = f"New best reward {episode_reward:0.1f} ({(episode_reward-best_reward)/best_reward*100:+.1f}%) at episode {episode}, saving model..."
+                        logger.debug(log_message)
                         with open(self.log_file, 'a') as file:
                             file.write(log_message + '\n')
                     best_reward = episode_reward
@@ -401,7 +398,7 @@ class FrozenLakeAgent:
         # Compute loss
         loss = self.loss_fn(current_q, target_q)
         # every N steps or batches
-        print(f"  [Optimize] step={step_count:6d}, loss={loss.item():.4f}, ε={self.epsilon:.3f}")
+        logger.debug(f"  [Optimize] step={step_count:6d}, loss={loss.item():.4f}, ε={self.epsilon:.3f}")
 
         # Optimize the model (backpropagation)
         self.optimizer.zero_grad()  # Clear gradients

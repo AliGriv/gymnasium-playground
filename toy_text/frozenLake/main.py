@@ -7,7 +7,7 @@ from pathlib import Path
 import gymnasium as gym
 import toy_text.utils as utils
 from typing import Dict, List
-import random
+from common.loggerConfig import logger
 
 def run(train: bool,
         test: bool,
@@ -31,7 +31,7 @@ def run(train: bool,
 
     # 3) TRAINING
     if train:
-        print(f"=== Starting training on {len(train_maps)} maps for {episodes} episodes each ===")
+        logger.info(f"=== Starting training on {len(train_maps)} maps for {episodes} episodes each ===")
         agent = FrozenLakeAgent(
             maps=train_maps,
             learning_rate=learning_rate,
@@ -48,7 +48,7 @@ def run(train: bool,
         if plot:
             # the agent’s run method already calls save_graph periodically,
             # and leaves the final plot at agent.graph_file
-            print(f"Training complete. Graph saved to {agent.graph_file}")
+            logger.info(f"Training complete. Graph saved to {agent.graph_file}")
 
     # 4) TESTING
     if test:
@@ -57,7 +57,7 @@ def run(train: bool,
         if load_for_test is None or not load_for_test.exists():
             raise FileNotFoundError(f"No model file found at {load_for_test!r} to load for test run")
 
-        print(f"=== Starting evaluation on {len(test_maps)} maps for {episodes} episodes each ===")
+        logger.info(f"=== Starting evaluation on {len(test_maps)} maps for {episodes} episodes each ===")
         tester = FrozenLakeAgent(
             maps=test_maps,
             learning_rate=learning_rate,      # lr is unused in test but required by ctor
@@ -71,4 +71,4 @@ def run(train: bool,
             is_training=False,
             render=render
         )
-        print("Testing complete.")
+        logger.info("Testing complete.")

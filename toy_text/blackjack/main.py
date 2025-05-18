@@ -5,6 +5,7 @@ import numpy as np
 from pathlib import Path
 import gymnasium as gym
 import toy_text.utils as utils
+from common.loggerConfig import logger
 
 MINIMUM_EPSILON = 0.05
 
@@ -23,25 +24,28 @@ def run(
     plot: bool = True
 ):
     """
-    Run the Blackjack experiment.
+    @brief Runs the Blackjack training and/or testing experiment.
 
-    Args:
-        train (bool): Whether to train the agent.
-        test (bool): Whether to test the agent.
-        episodes (int): Number of episodes to run.
-        render (bool): Whether to render the environment.
-        learning_rate (float): Learning rate for the agent.
-        start_epsilon (float): Initial exploration rate.
-        epsilon_decay (float): Rate at which epsilon decays.
-        model_save_path (str, optional): Path to save the trained model.
-        model_load_path (str, optional): Path to load the model.
-        plot (bool): Whether to plot training statistics.
+    Initializes the environment and agent, loads or saves the Q-table,
+    runs training/testing episodes, and optionally plots the results.
+
+    @param train Whether to train the agent.
+    @param test Whether to test the agent.
+    @param episodes Number of episodes to run.
+    @param render Whether to render the environment during testing.
+    @param learning_rate Learning rate (alpha) for Q-learning updates.
+    @param start_epsilon Initial epsilon value for the epsilon-greedy strategy.
+    @param epsilon_decay Amount by which epsilon decays after each episode.
+    @param epsilon_min Minimum value for epsilon after decay.
+    @param model_save_path Optional path to save the Q-table after training.
+    @param model_load_path Optional path to load an existing Q-table before training/testing.
+    @param plot Whether to plot training statistics (rewards, errors).
     """
 
     env = gym.make('Blackjack-v1', sab=False, render_mode='human' if render else None)
     env = gym.wrappers.RecordEpisodeStatistics(env, buffer_length=episodes)
 
-    
+
     if model_load_path:
         model_load_path = Path(model_load_path)
     existing_model = utils.load_existing_model(model_load_path)
@@ -61,7 +65,7 @@ def run(
         truncated_per_episode = []
 
         if not is_train:
-            agent.epsilon = epsilon_min  
+            agent.epsilon = epsilon_min
 
         for episode in tqdm(range(num_episodes), desc="Episodes", leave=False):
             obs, info = env.reset()
@@ -107,7 +111,7 @@ def run(
         tr = test_stats['truncated']
 
         for episode in range(num_test_episodes):
-            print(f"Episode #{episode}: Reward {r[episode]}, Terminated {te[episode]}, Truncated {tr[episode]}")
+            logger.info(f"Episode #{episode}: Reward {r[episode]}, Terminated {te[episode]}, Truncated {tr[episode]}")
 
     env.close()
 
