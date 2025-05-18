@@ -3,6 +3,7 @@ from pathlib import Path
 import pickle
 from typing import Any, Dict, Tuple
 import random
+from common.loggerConfig import logger
 
 def get_moving_avgs(arr, window, convolution_mode):
     return np.convolve(
@@ -20,9 +21,9 @@ def load_existing_model(model_path: Path) -> np.ndarray:
             model = pickle.load(f)
             f.close()
         except Exception as e:
-            print(f"Exception occured while loading {model_path}: {e}")
+            logger.exception(f"Exception occured while loading {model_path}: {e}")
     elif model_path:
-        print(f"Provided path does not exists: {model_path}")
+        logger.error(f"Provided path does not exists: {model_path}")
     return model
 
 def save_trained_model(model_path: Path, model: Any):
@@ -33,7 +34,7 @@ def save_trained_model(model_path: Path, model: Any):
         pickle.dump(model, f)
         f.close()
     except Exception as e:
-        print(f"Exception occured while saving the file to {model_path}: {e}")
+        logger.exception(f"Exception occured while saving the file to {model_path}: {e}")
 
 def split_dict(data: Dict, test_size: float) -> Tuple[Dict, Dict]:
     if not 0 < test_size < 1:
