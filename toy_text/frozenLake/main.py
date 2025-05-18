@@ -23,8 +23,8 @@ def run(train: bool,
         plot: bool = True):
 
     # 1) Split into training and testing maps
-    train_maps, test_maps = utils.split_dict(dataset, test_size)
-
+    # train_maps, test_maps = utils.split_dict(dataset, test_size) # TODO
+    train_maps, test_maps = dataset, dataset
     # 2) Normalize paths
     save_path = Path(model_save_path) if model_save_path else None
     load_path = Path(model_load_path) if model_load_path else None
@@ -61,8 +61,8 @@ def run(train: bool,
         tester = FrozenLakeAgent(
             maps=test_maps,
             learning_rate=learning_rate,      # lr is unused in test but required by ctor
-            initial_epsilon=final_epsilon,    # start & final equal so no exploration
-            final_epsilon=final_epsilon,
+            initial_epsilon=0.00,    # start & final equal so no exploration
+            final_epsilon=0.00,
             existing_dqn_path=load_for_test,
             save_dqn_path=save_path
         )

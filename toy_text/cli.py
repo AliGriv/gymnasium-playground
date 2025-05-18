@@ -33,7 +33,7 @@ def taxi(train, test, model_save_path, model_load_path, render, learning_rate, e
 
     if epsilon_decay is None:
         epsilon_decay = epsilon / (episodes / 2)
-    
+
     if plot and not train:
         plot = False
 
@@ -131,6 +131,7 @@ def blackjack(train, test, model_save_path, model_load_path, render, learning_ra
 
 
 @cli.command()
+@click.option('--load-maps-from', type=str, default=None, help='Path to existing maps dataset')
 @click.option('--num-maps', default=1000, type=int,
               help='Number of maps to generate')
 @click.option('--maps-save-path', default='datasets/toy_text/frozenlake.json', type=str,
@@ -139,7 +140,7 @@ def blackjack(train, test, model_save_path, model_load_path, render, learning_ra
               help='Map size (e.g. 8 for 8×8)')
 @click.option('--compress', is_flag=True,
               help='Compress the JSON file')
-@click.option('--train/--no-train', default=True,
+@click.option('--train/--no-train', default=False,
               help='Whether to train on these maps')
 @click.option('--test/--no-test', default=False,
               help='Whether to evaluate on held-out maps')
@@ -161,7 +162,8 @@ def blackjack(train, test, model_save_path, model_load_path, render, learning_ra
               help='Path to an existing model to load')
 @click.option('--no-plot', 'plot', flag_value=False, default=True,
               help='Disable plotting of training curves')
-def frozen_lake(num_maps: int,
+def frozen_lake(load_maps_from: str,
+                num_maps: int,
                 maps_save_path: str,
                 size: int,
                 compress: bool,
@@ -176,21 +178,24 @@ def frozen_lake(num_maps: int,
                 model_save_path: str,
                 model_load_path: str,
                 plot: bool):
-    """
-    Generate FrozenLake maps, then train and/or test a DQN agent.
-    """
 
-    dataset = FrozenLakeMaps.generate_dataset(
-        num_maps=num_maps,
-        size=size,
-        filepath=maps_save_path,
-        compress=compress
-    )
-    print(f"Generated {len(dataset)} maps → {maps_save_path}")
-    
-    # TODO: Load existing maps 
+    if load_maps_from:
+        dataset = FrozenLakeMaps.load_maps(load_maps_from)
+        print(f"Loaded {len(dataset)} maps from {load_maps_from}")
 
-    
+    else:
+        """
+        Generate FrozenLake maps, then train and/or test a DQN agent.
+        """
+        dataset = FrozenLakeMaps.generate_dataset(
+            num_maps=num_maps,
+            size=size,
+            filepath=maps_save_path,
+            compress=compress
+        )
+        print(f"Generated {len(dataset)} maps → {maps_save_path}")
+
+
     run_frozenlake(
         train=train,
         test=test,
