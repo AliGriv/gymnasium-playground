@@ -8,8 +8,9 @@ class ReplayMemory:
     @class ReplayMemory
     @brief A fixed-size buffer to store experience tuples for DQN training.
 
-    Stores transitions (state, action, next_state, reward, terminated) and 
+    Stores transitions (state, action, next_state, reward, terminated) and
     supports random sampling for mini-batch training.
+    Keeps a separate buffer for successful episodes.
 
     @param max_size Maximum number of transitions to store in memory.
     """
@@ -28,6 +29,13 @@ class ReplayMemory:
         self.rewards: Deque[float] = deque([], maxlen=max_size)
         self.terminated: Deque[bool] = deque([], maxlen=max_size)
 
+
+        self.success_states: Deque[Any] = deque([], maxlen=max_size)
+        self.success_actions: Deque[Any] = deque([], maxlen=max_size)
+        self.success_next_states: Deque[Any] = deque([], maxlen=max_size)
+        self.success_rewards: Deque[float] = deque([], maxlen=max_size)
+        self.success_terminated: Deque[bool] = deque([], maxlen=max_size)
+
     def push(self, state: Any, action: Any, next_state: Any, reward: float, terminated: bool) -> None:
         """
         @brief Adds a transition to the replay buffer.
@@ -44,21 +52,76 @@ class ReplayMemory:
         self.rewards.append(reward)
         self.terminated.append(terminated)
 
-    def sample(self, sample_size: int) -> Tuple[List[Any], List[Any], List[Any], List[float], List[bool]]:
+    def push_success(self, states: List | deque, actions: List | deque, next_states: List | deque, rewards: List | deque, terminateds: List | deque) -> None:
         """
-        @brief Randomly samples a batch of transitions from the memory.
+        @brief Adds a transition to the replay buffer.
 
-        @param sample_size Number of samples to return.
+        @param state      List or Deque of the current state.
+        @param action     List or Deque of the action taken.
+        @param next_state List or Deque of the resulting next state.
+        @param reward     List or Deque of the reward received.
+        @param terminated List or Deque of whether the episode terminated after this transition.
+        """
+        self.success_states.extend(states)
+        self.success_actions.extend(actions)
+        self.success_next_states.extend(next_states)
+        self.success_rewards.extend(rewards)
+        self.success_terminated.extend(terminateds)
+
+    def sample(self, sample_size: int, success_ratio: float = 0.50) -> Tuple[List[Any], List[Any], List[Any], List[float], List[bool]]:
+        """
+        @brief Randomly samples a batch of transitions from the memory, optionally including success transitions.
+
+        @param sample_size   Number of samples to return.
+        @param success_ratio Proportion of samples to draw from success memory (default: 0.5).
         @return A tuple containing lists of (states, actions, next_states, rewards, terminated_flags).
         """
-        indices = random.sample(range(len(self)), sample_size)
-        return (
-            [self.states[i] for i in indices],
-            [self.actions[i] for i in indices],
-            [self.next_states[i] for i in indices],
-            [self.rewards[i] for i in indices],
-            [self.terminated[i] for i in indices],
-        )
+        success_count = int(sample_size * success_ratio)
+        regular_count = sample_size - success_count
+
+        success_len = len(self.success_states)
+        main_len = len(self)
+
+        # If not enough success samples, fall back to only regular memory
+        if success_len < success_count:
+            indices = random.sample(range(main_len), sample_size)
+            return (
+                [self.states[i] for i in indices],
+                [self.actions[i] for i in indices],
+                [self.next_states[i] for i in indices],
+                [self.rewards[i] for i in indices],
+                [self.terminated[i] for i in indices],
+            )
+
+        # Otherwise, mix success and regular samples
+        success_indices = random.sample(range(success_len), success_count)
+        regular_indices = random.sample(range(main_len), regular_count)
+
+        states = [self.success_states[i] for i in success_indices] + [self.states[i] for i in regular_indices]
+        actions = [self.success_actions[i] for i in success_indices] + [self.actions[i] for i in regular_indices]
+        next_states = [self.success_next_states[i] for i in success_indices] + [self.next_states[i] for i in regular_indices]
+        rewards = [2.0*self.success_rewards[i] for i in success_indices] + [self.rewards[i] for i in regular_indices]
+        terminated_flags = [self.success_terminated[i] for i in success_indices] + [self.terminated[i] for i in regular_indices]
+        print(f"[Sampled] {len(success_indices)} from success, {len(regular_indices)} from regular")
+        return states, actions, next_states, rewards, terminated_flags
+
+
+    def clear(self, include_success: bool = False) -> None:
+        """
+        @brief Clears the memory.
+        """
+        self.states.clear()
+        self.actions.clear()
+        self.next_states.clear()
+        self.rewards.clear()
+        self.terminated.clear()
+
+        if include_success:
+            self.success_states.clear()
+            self.success_actions.clear()
+            self.success_next_states.clear()
+            self.success_rewards.clear()
+            self.success_terminated.clear()
 
     def __len__(self) -> int:
         """
