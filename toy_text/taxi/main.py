@@ -3,7 +3,7 @@ from toy_text.taxi.taxiAgent import *
 from matplotlib import pyplot as plt
 from pathlib import Path
 import toy_text.utils as utils
-
+from common.loggerConfig import logger
 
 
 
@@ -20,18 +20,21 @@ def run(
     plot: bool = True
 ):
     """
-    Run the Taxi experiment.
+    @brief Entry point for training and testing a Q-learning agent on the Taxi-v3 environment.
 
-    Args:
-        train (bool): Whether to train the agent.
-        test (bool): Whether to test the agent.
-        episodes (int): Number of episodes to run.
-        render (bool): Whether to render the environment.
-        learning_rate (float): Learning rate for the agent.
-        epsilon (float): Initial exploration rate.
-        epsilon_decay (float): Rate at which epsilon decays.
-        model_save_path (str): Path to save the trained model.
-        model_load_path (str, optional): Path to load the model for testing (or additional training).
+    Initializes the environment and agent, handles model loading/saving, and executes training
+    and/or testing episodes. Optionally renders the environment and plots results.
+
+    @param train Flag to indicate if the agent should be trained.
+    @param test Flag to indicate if the agent should be tested.
+    @param episodes Number of episodes to run during training or testing.
+    @param render Flag to render the environment (True for visualization).
+    @param learning_rate Learning rate (alpha) for Q-learning updates.
+    @param start_epsilon Initial exploration rate for the epsilon-greedy policy.
+    @param epsilon_decay Rate at which epsilon is decayed after each episode.
+    @param model_save_path Path to save the trained Q-table (as a model).
+    @param model_load_path Optional path to load a pre-trained Q-table.
+    @param plot Whether to plot training statistics (rewards and errors).
     """
 
     env = gym.make('Taxi-v3', render_mode='human' if render else None)
@@ -82,8 +85,8 @@ def run(
             truncated_per_episode.append(truncated)
 
         stats = {
-            'rewards': rewards_per_episode, 
-            'terminated': terminated_per_episode, 
+            'rewards': rewards_per_episode,
+            'terminated': terminated_per_episode,
             'truncated': truncated_per_episode
             }
         return stats
@@ -101,7 +104,7 @@ def run(
         te = test_stats['terminated']
         tr = test_stats['truncated']
         for episode in range(episodes):
-            print(f"Episode #{episode}: Reward {r[episode]}, Terminated {te[episode]}, Truncated {tr[episode]}")
+            logger.info(f"Episode #{episode}: Reward {r[episode]}, Terminated {te[episode]}, Truncated {tr[episode]}")
 
     env.close()
 

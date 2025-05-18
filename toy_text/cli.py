@@ -3,6 +3,7 @@ from toy_text.taxi.main import run as run_taxi
 from toy_text.blackjack.main import run as run_blackjack
 from toy_text.frozenLake.frozenLakeMaps import FrozenLakeMaps
 from toy_text.frozenLake.main import run as run_frozenlake
+from common.loggerConfig import logger
 
 @click.group()
 def cli():
@@ -43,16 +44,16 @@ def taxi(train, test, model_save_path, model_load_path, render, learning_rate, e
         model_save_path += '.pkl'
 
 
-    print("Running Taxi experiment with:")
-    print(f"  Mode: {'train' if train else ''} {'test' if test else ''}")
-    print(f"  Episodes: {episodes}")
-    print(f"  Epsilon: {epsilon}")
-    print(f"  Epsilon Decay: {epsilon_decay}")
-    print(f"  Model Save Path: {model_save_path}")
-    print(f"  Model Load Path: {model_load_path}")
-    print(f"  Render: {render}")
-    print(f"  Learning Rate: {learning_rate}")
-    print(f"  Plots: {plot}")
+    logger.info("Running Taxi experiment with:")
+    logger.info(f"  Mode: {'train' if train else ''} {'test' if test else ''}")
+    logger.info(f"  Episodes: {episodes}")
+    logger.info(f"  Epsilon: {epsilon}")
+    logger.info(f"  Epsilon Decay: {epsilon_decay}")
+    logger.info(f"  Model Save Path: {model_save_path}")
+    logger.info(f"  Model Load Path: {model_load_path}")
+    logger.info(f"  Render: {render}")
+    logger.info(f"  Learning Rate: {learning_rate}")
+    logger.info(f"  Plots: {plot}")
 
     # Call your training or testing function here
     run_taxi(
@@ -102,17 +103,17 @@ def blackjack(train, test, model_save_path, model_load_path, render, learning_ra
     elif train and not model_save_path.endswith('.pkl'):
         model_save_path += '.pkl'
 
-    print("Running Blackjack experiment with:")
-    print(f"  Mode: {'train' if train else ''} {'test' if test else ''}")
-    print(f"  Episodes: {episodes}")
-    print(f"  Epsilon: {epsilon}")
-    print(f"  Epsilon Decay: {epsilon_decay}")
-    print(f"  Epsilon Minimum: {epsilon_min}")
-    print(f"  Model Save Path: {model_save_path}")
-    print(f"  Model Load Path: {model_load_path}")
-    print(f"  Render: {render}")
-    print(f"  Learning Rate: {learning_rate}")
-    print(f"  Plots: {plot}")
+    logger.info("Running Blackjack experiment with:")
+    logger.info(f"  Mode: {'train' if train else ''} {'test' if test else ''}")
+    logger.info(f"  Episodes: {episodes}")
+    logger.info(f"  Epsilon: {epsilon}")
+    logger.info(f"  Epsilon Decay: {epsilon_decay}")
+    logger.info(f"  Epsilon Minimum: {epsilon_min}")
+    logger.info(f"  Model Save Path: {model_save_path}")
+    logger.info(f"  Model Load Path: {model_load_path}")
+    logger.info(f"  Render: {render}")
+    logger.info(f"  Learning Rate: {learning_rate}")
+    logger.info(f"  Plots: {plot}")
 
     # Call your blackjack run function here
     run_blackjack(
@@ -181,7 +182,7 @@ def frozen_lake(load_maps_from: str,
 
     if load_maps_from:
         dataset = FrozenLakeMaps.load_maps(load_maps_from)
-        print(f"Loaded {len(dataset)} maps from {load_maps_from}")
+        logger.info(f"Loaded {len(dataset)} maps from {load_maps_from}")
 
     else:
         """
@@ -193,7 +194,7 @@ def frozen_lake(load_maps_from: str,
             filepath=maps_save_path,
             compress=compress
         )
-        print(f"Generated {len(dataset)} maps → {maps_save_path}")
+        logger.info(f"Generated {len(dataset)} maps → {maps_save_path}")
 
 
     run_frozenlake(
