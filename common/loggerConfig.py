@@ -9,7 +9,7 @@ logs_dir.mkdir(exist_ok=True)
 
 # Create timestamped log file name
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-log_file = logs_dir / f"run_{timestamp}.log.zip"
+log_file = logs_dir / f"run_{timestamp}.log"
 
 # Clear default loguru handler
 logger.remove()
@@ -29,7 +29,7 @@ logger.add(
     diagnose=True,
 )
 
-# Add log file output (timestamped and compressed)
+# Add log file output (timestamped)
 logger.add(
     str(log_file),
     level="TRACE",
@@ -38,8 +38,7 @@ logger.add(
         "{name}:{function}:{line} - {message}"
     ),
     backtrace=True,
-    diagnose=True,
-    compression="zip"
+    diagnose=True
 )
 
 # Expose logger to be imported

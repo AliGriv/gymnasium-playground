@@ -131,8 +131,14 @@ class FrozenLakeAgent:
         if isinstance(existing_dqn_path, str):
             existing_dqn_path = Path(existing_dqn_path)
         if existing_dqn_path and existing_dqn_path.exists():
-            self.q_net.load_state_dict(torch.load(existing_dqn_path))
-            logger.info(f"Loaded existing DQN from {existing_dqn_path}")
+            try:
+                q_net = DQN.load_model(existing_dqn_path)
+                self.q_net = q_net
+            except Exception as e:
+                logger.warning(f"Faield to load the model from {existing_dqn_path}: {e}")
+                logger.info(f"Switching to default model.")
+                self.q_net.load_state_dict(torch.load(existing_dqn_path))
+                logger.info(f"Loaded existing DQN from {existing_dqn_path}")
 
         self.log_file = Path(log_directory) / 'frozenLake.log'
         self.graph_file = Path(log_directory) / 'frozenLake.png'
@@ -277,7 +283,7 @@ class FrozenLakeAgent:
             # Save model when new best reward is obtained.
             if is_training:
                 if episode > self.save_interval:
-                    torch.save(self.q_net.state_dict(), self.save_path)
+                    self.q_net.save_model(self.save_path)
                 if episode_reward > best_reward:
                     if best_reward:
                         log_message = f"New best reward {episode_reward:0.1f} ({(episode_reward-best_reward)/best_reward*100:+.1f}%) at episode {episode}, saving model..."

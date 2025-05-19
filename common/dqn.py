@@ -1,8 +1,12 @@
 import torch
+import json
 from torch import nn
 import torch.nn.init as init
 import torch.nn.functional as F
-from typing import List
+from typing import List, Union, Optional
+from pathlib import Path
+from datetime import datetime
+from common.loggerConfig import logger
 
 """
 Disclaimer: This code is heavily inspired by https://github.com/johnnycode8/dqn_pytorch/blob/main/dqn.py
@@ -23,10 +27,10 @@ class DQN(nn.Module):
     @param enable_dueling_dqn Whether to use dueling DQN architecture.
     """
 
-    def __init__(self, 
-                 state_dim: int, 
-                 action_dim: int, 
-                 hidden_dims: List[int] = [256], 
+    def __init__(self,
+                 state_dim: int,
+                 action_dim: int,
+                 hidden_dims: List[int] = [256],
                  enable_dueling_dqn: bool = True):
         super().__init__()
         self.enable_dueling_dqn=enable_dueling_dqn
@@ -127,14 +131,88 @@ class DQN(nn.Module):
         info += ")"
         return info
 
+    def save_model(self, path: Union[str, Path], notes: Optional[str] = None):
+        """
+        @brief Save model weights and architecture metadata.
+
+        Saves both the model weights (.pt file) and a human-readable JSON metadata file
+        that contains the model architecture and other optional notes.
+
+        @param path Destination path (without extension) to save the files.
+        @param notes Optional comments or notes to include in the metadata.
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Save weights
+        torch.save(self.state_dict(), path.with_suffix(".pt"))
+
+        # Save metadata
+        metadata = {
+            "state_dim": self.fc1.in_features,
+            "action_dim": self.output.out_features if not self.enable_dueling_dqn else self.advantages.out_features,
+            "hidden_dims": self.hidden_dims,
+            "enable_dueling_dqn": self.enable_dueling_dqn,
+            "timestamp": datetime.now().isoformat()
+        }
+        if notes:
+            metadata["notes"] = notes
+
+        with open(path.with_suffix(".json"), "w") as f:
+            json.dump(metadata, f, indent=4)
+
+    @classmethod
+    def load_model(cls, path: Union[str, Path]) -> "DQN":
+        """
+        @brief Load a new DQN instance from saved weights and metadata.
+
+        Loads model architecture from a JSON metadata file and reconstructs the model.
+        Then loads the saved weights from a corresponding .pt file. If the metadata file
+        is missing or malformed, an error is raised. This method creates a new instance
+        of the DQN model using the loaded architecture.
+
+        @param path Base path (without extension) from which to load the model.
+                    Expected files are <path>.json for metadata and <path>.pt for weights.
+        @return DQN instance with architecture and weights loaded.
+        """
+        path = Path(path)
+        weights_path = path.with_suffix(".pt")
+        metadata_path = path.with_suffix(".json")
+        metadata = None
+        if metadata_path.exists():
+            try:
+                with open(metadata_path, "r") as f:
+                    metadata = json.load(f)
+
+                # Optional logging or verification of compatibility
+                logger.info(f"Loaded architecture metadata: {metadata}")
+            except:
+                logger.exception(f"Failed to load the metadata from {metadata_path}.")
+        else:
+            raise RuntimeError(f"Metadata file not found at {metadata_path}. "
+                          f"Using current architecture to load weights.")
+
+        if not metadata:
+            raise RuntimeError(f"No metadata/architecture was defined for the model.")
+        else:
+            model = cls(**{
+                "state_dim": metadata["state_dim"],
+                "action_dim": metadata["action_dim"],
+                "hidden_dims": metadata["hidden_dims"],
+                "enable_dueling_dqn": metadata["enable_dueling_dqn"]
+            })
+        model.load_state_dict(torch.load(weights_path))
+        model.eval()
+        return model
+
 if __name__ == '__main__':
     state_dim = 12
     action_dim = 2
     hidden_dims = [20, 5, 5]
     net = DQN(state_dim, action_dim, hidden_dims=hidden_dims, enable_dueling_dqn=True)
     state = torch.randn(10, state_dim)
-    
-    
+
+
     print(f"DQN Model: {net}")
     print(f"Input: {state}")
     output = net(state)
