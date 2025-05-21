@@ -1,4 +1,6 @@
 import click
+import sys
+from typing import List
 from toy_text.taxi.main import run as run_taxi
 from toy_text.blackjack.main import run as run_blackjack
 from toy_text.frozenLake.frozenLakeMaps import FrozenLakeMaps
@@ -163,7 +165,21 @@ def blackjack(train, test, model_save_path, model_load_path, render, learning_ra
               help='Path to an existing model to load')
 @click.option('--no-plot', 'plot', flag_value=False, default=True,
               help='Disable plotting of training curves')
-def frozen_lake(load_maps_from: str,
+@click.option('--slippery', flag_value=True, default=False,
+              help='Use slippery environment')
+@click.option('--enable-dueling', flag_value=True, default = False,
+              help='Use dueling method for training the DQN')
+@click.option('--double-dqn', flag_value=True, default = False,
+              help='Use double networkig architecture for the DQN')
+@click.option('--hidden-layers', multiple=True, type=int,
+              default=(12,),
+              help="List of integers indicating the number of nodes in each hidden layer.")
+@click.option('--max-episode-steps', default=500, type=int,
+              help='Maximum number of steps per episode')
+@click.pass_context
+def frozen_lake(
+                ctx,
+                load_maps_from: str,
                 num_maps: int,
                 maps_save_path: str,
                 size: int,
@@ -178,7 +194,17 @@ def frozen_lake(load_maps_from: str,
                 test_size: float,
                 model_save_path: str,
                 model_load_path: str,
-                plot: bool):
+                plot: bool,
+                slippery: bool,
+                enable_dueling: bool,
+                double_dqn: bool,
+                hidden_layers: List[int],
+                max_episode_steps: int):
+
+    # Check if no arguments were passed (just the command name)
+    if len(sys.argv) <= 1 or (len(sys.argv) == 3 and sys.argv[-1] == "frozen-lake"):
+        click.echo(ctx.get_help())
+        return
 
     if load_maps_from:
         dataset = FrozenLakeMaps.load_maps(load_maps_from)
@@ -209,5 +235,10 @@ def frozen_lake(load_maps_from: str,
         test_size=test_size,
         model_save_path=model_save_path,
         model_load_path=model_load_path,
-        plot=plot
+        plot=plot,
+        is_slippery=slippery,
+        enable_dqn_dueling=enable_dueling,
+        enable_dqn_double=double_dqn,
+        hidden_layer_dims=hidden_layers,
+        max_episode_steps=max_episode_steps
     )

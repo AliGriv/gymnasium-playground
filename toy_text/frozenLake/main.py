@@ -20,7 +20,12 @@ def run(train: bool,
         test_size: float = 0.2,
         model_save_path: str = None,
         model_load_path: str = None,
-        plot: bool = True):
+        plot: bool = True,
+        is_slippery: bool = False,
+        enable_dqn_dueling: bool = False,
+        enable_dqn_double: bool = False,
+        hidden_layer_dims: List[int] = [12],
+        max_episode_steps: int = 500):
 
     # 1) Split into training and testing maps
     # train_maps, test_maps = utils.split_dict(dataset, test_size) # TODO
@@ -38,7 +43,12 @@ def run(train: bool,
             initial_epsilon=start_epsilon,
             final_epsilon=final_epsilon,
             existing_dqn_path=load_path,
-            save_dqn_path=save_path
+            save_dqn_path=save_path,
+            is_slippery=is_slippery,
+            enable_dqn_dueling=enable_dqn_dueling,
+            enable_dqn_double=enable_dqn_double,
+            hidden_layer_dims=hidden_layer_dims,
+            max_episode_steps=max_episode_steps
         )
         agent.run(
             num_episodes=episodes,
@@ -64,7 +74,12 @@ def run(train: bool,
             initial_epsilon=0.00,    # start & final equal so no exploration
             final_epsilon=0.00,
             existing_dqn_path=load_for_test,
-            save_dqn_path=save_path
+            save_dqn_path=save_path,
+            is_slippery=is_slippery,
+            enable_dqn_dueling=enable_dqn_dueling,
+            enable_dqn_double=enable_dqn_double,
+            hidden_layer_dims=hidden_layer_dims,
+            max_episode_steps=max_episode_steps
         )
         tester.run(
             num_episodes=episodes,

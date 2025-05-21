@@ -388,7 +388,6 @@ class FrozenLakeAgent:
 
 
         with torch.no_grad():
-            # TODO: Test with double enabled
             if self.enable_dqn_double:
                 best_actions_from_policy = policy_dqn(new_states).argmax(dim=1)
 
