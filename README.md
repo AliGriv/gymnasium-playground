@@ -73,10 +73,44 @@ gym-playground toy-text taxi --train --model-save-path model/taxi --episodes 150
 - Example: Test the model for 2 episodes and render:
 
 ```sh
-gym-playground toy-text taxi --test --model-load-path model/taxi.pkl --episodes 2 --render 
+gym-playground toy-text taxi --test --model-load-path model/taxi.pkl --episodes 2 --render
 ```
 
 ### Blackjack
 
 - Documentation is [here](https://gymnasium.farama.org/environments/toy_text/blackjack/).
 - Same arguments as [Taxi](#taxi). Except it has `--epsilon-min` which is by default on `0.05`.
+
+### FrozenLake
+
+- This is a work in progress. Docs is [here](https://gymnasium.farama.org/environments/toy_text/frozen_lake/).
+- The target is to use Deep Neural networks to train a model for Q-function.
+- Here are a list of available options:
+```
+Usage: gym-playground toy-text frozen-lake [OPTIONS]
+
+Options:
+  --load-maps-from TEXT        Path to existing maps dataset
+  --num-maps INTEGER           Number of maps to generate
+  --maps-save-path TEXT        Where to store the maps dataset as JSON
+  --size INTEGER               Map size (e.g. 8 for 8×8)
+  --compress                   Compress the JSON file
+  --train / --no-train         Whether to train on these maps
+  --test / --no-test           Whether to evaluate on held-out maps
+  --episodes INTEGER           Episodes per map
+  --render                     Render the environment to screen
+  --learning-rate FLOAT        DQN learning rate
+  --start-epsilon FLOAT        Initial ϵ-greedy value
+  --final-epsilon FLOAT        Final ϵ after decay
+  --test-size FLOAT            Fraction of maps held out for testing
+  --model-save-path TEXT       Where to checkpoint trained model
+  --model-load-path TEXT       Path to an existing model to load
+  --no-plot                    Disable plotting of training curves
+  --slippery                   Use slippery environment
+  --enable-dueling             Use dueling method for training the DQN
+  --double-dqn                 Use double networkig architecture for the DQN
+  --hidden-layers INTEGER      List of integers indicating the number of nodes
+                               in each hidden layer.
+  --max-episode-steps INTEGER  Maximum number of steps per episode
+  --help                       Show this message and exit.
+  ```
