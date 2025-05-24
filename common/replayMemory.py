@@ -1,7 +1,7 @@
 from collections import deque
 from typing import Deque, Tuple, Any, List
 import random
-
+from common.loggerConfig import logger
 
 class ReplayMemory:
     """
@@ -102,7 +102,7 @@ class ReplayMemory:
         next_states = [self.success_next_states[i] for i in success_indices] + [self.next_states[i] for i in regular_indices]
         rewards = [2.0*self.success_rewards[i] for i in success_indices] + [self.rewards[i] for i in regular_indices]
         terminated_flags = [self.success_terminated[i] for i in success_indices] + [self.terminated[i] for i in regular_indices]
-        print(f"[Sampled] {len(success_indices)} from success, {len(regular_indices)} from regular")
+        logger.debug(f"[Sampled] {len(success_indices)} from success, {len(regular_indices)} from regular")
         return states, actions, next_states, rewards, terminated_flags
 
 

@@ -171,7 +171,7 @@ def blackjack(train, test, model_save_path, model_load_path, render, learning_ra
               help='Use dueling method for training the DQN')
 @click.option('--double-dqn', flag_value=True, default = False,
               help='Use double networkig architecture for the DQN')
-@click.option('--hidden-layers', multiple=True, type=int,
+@click.option('--hidden-layers', multiple=True, type=int, # TODO: Change this
               default=(12,),
               help="List of integers indicating the number of nodes in each hidden layer.")
 @click.option('--max-episode-steps', default=500, type=int,
@@ -239,6 +239,6 @@ def frozen_lake(
         is_slippery=slippery,
         enable_dqn_dueling=enable_dueling,
         enable_dqn_double=double_dqn,
-        hidden_layer_dims=hidden_layers,
+        hidden_layer_dims=list(hidden_layers),
         max_episode_steps=max_episode_steps
     )

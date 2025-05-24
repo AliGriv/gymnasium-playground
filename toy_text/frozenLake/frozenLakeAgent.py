@@ -1,5 +1,6 @@
 import itertools
 import random
+from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -95,20 +96,6 @@ class FrozenLakeAgent:
         state_dim = self.size**2 # TODO: Extend this
         action_dim = 4
 
-        # DQN and target network
-        self.q_net = DQN(state_dim=state_dim,
-                         action_dim=action_dim,
-                         hidden_dims=hidden_layer_dims,
-                         enable_dueling_dqn=enable_dqn_dueling)
-
-        self.target_net = DQN(state_dim=state_dim,
-                              action_dim=action_dim,
-                              hidden_dims=hidden_layer_dims,
-                              enable_dueling_dqn=enable_dqn_dueling)
-
-        self.q_net.to(self.device)
-        self.target_net.to(self.device)
-
 
         self.save_path = save_dqn_path
 
@@ -118,31 +105,48 @@ class FrozenLakeAgent:
 
             self.save_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Optimizer
-        self.optimizer = self.get_optimizer(optimizer, self.q_net.parameters(), lr=self.lr)
-
-        # Loss Function
-        self.loss_fn = torch.nn.MSELoss()
-
-        # Replay memory
-        self.memory = ReplayMemory(replay_memory_size)
-
         # Load existing model if provided
         if isinstance(existing_dqn_path, str):
             existing_dqn_path = Path(existing_dqn_path)
         if existing_dqn_path and existing_dqn_path.exists():
             try:
-                q_net = DQN.load_model(existing_dqn_path)
+                q_net = DQN.load_model(existing_dqn_path, self.device) #TODO: Remove this device
                 self.q_net = q_net
             except Exception as e:
                 logger.warning(f"Faield to load the model from {existing_dqn_path}: {e}")
                 logger.info(f"Switching to default model.")
                 self.q_net.load_state_dict(torch.load(existing_dqn_path))
                 logger.info(f"Loaded existing DQN from {existing_dqn_path}")
+            self.target_net = deepcopy(self.q_net)
+            self.target_net.to(self.device)
+
+        else:
+            # DQN and target network
+            self.q_net = DQN(state_dim=state_dim,
+                             action_dim=action_dim,
+                             hidden_dims=hidden_layer_dims,
+                             enable_dueling_dqn=enable_dqn_dueling)
+
+            self.target_net = DQN(state_dim=state_dim,
+                                 action_dim=action_dim,
+                                 hidden_dims=hidden_layer_dims,
+                                 enable_dueling_dqn=enable_dqn_dueling)
+
+            self.q_net.to(self.device)
+            self.target_net.to(self.device)
+
+        # Optimizer
+        self.optimizer = self.get_optimizer(optimizer, self.q_net.parameters(), lr=self.lr)
+        # Loss Function
+        self.loss_fn = torch.nn.MSELoss()
+
+        # Replay memory
+        self.memory = ReplayMemory(replay_memory_size)
 
         self.log_file = Path(log_directory) / 'frozenLake.log'
         self.graph_file = Path(log_directory) / 'frozenLake.png'
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
+
 
     def get_optimizer(self, optimizer: str, model_parameters, lr: float):
         # TODO: Add doxygen
@@ -154,7 +158,7 @@ class FrozenLakeAgent:
         else:
             raise ValueError(f"Unsupported optimizer: {optimizer}. Supported optimizers are 'adam' and 'sgd'.")
 
-    def get_action(self, state: torch.tensor) -> torch.tensor:
+    def get_action(self, state: torch.tensor) -> int:
         # TODO: Add doxygen
         if np.random.random() < self.epsilon:
             action =  self.env.action_space.sample()
@@ -176,6 +180,8 @@ class FrozenLakeAgent:
 
     def run(self, num_episodes: Optional[int]=None, is_training: bool = True, render: bool = False):
         # TODO: Add doxygen
+
+        logger.info(f"Running agent with policy network {self.q_net}")
 
         if num_episodes:
             self.epsilon_decay = (self.epsilon - self.final_epsilon) / (num_episodes * 0.95)
@@ -309,6 +315,12 @@ class FrozenLakeAgent:
                         self.sync_target_network()
                         step_count=0
                 self.decay_epsilon()
+
+        if is_training:
+            self.q_net.save_model(self.save_path)
+            logger.info(f"Training complete. Model saved to {self.save_path}")
+            # for name, param in self.q_net.named_parameters():
+            #     logger.debug(f"{name}: {param.data}")
 
     def save_graph(self, rewards_per_episode: List[float], epsilon_history: List[float]) -> None:
         """

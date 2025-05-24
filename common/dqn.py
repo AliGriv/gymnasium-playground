@@ -90,25 +90,26 @@ class DQN(nn.Module):
 
         if self.enable_dueling_dqn:
             # Value calc
-            v = x.clone()
+            v = x
             for value_layer in self.value_layers:
                 v = F.relu(value_layer(v))
             V = self.value(v)
 
             # Advantages calc
-            a = x.clone()
+            a = x
             for adv_layer in self.adv_layers:
                 a = F.relu(adv_layer(a))
             A = self.advantages(a)
 
             # Calc Q
+            if A.dim() == 1:
+                A = A.unsqueeze(0)
             Q = V + A - torch.mean(A, dim=1, keepdim=True)
 
         else:
             for layer in self.hidden_layers:
                 x = F.relu(layer(x))
             Q = self.output(x)
-
         return Q
 
     def __repr__(self) -> str:
@@ -146,6 +147,7 @@ class DQN(nn.Module):
 
         # Save weights
         torch.save(self.state_dict(), path.with_suffix(".pt"))
+        logger.info(f"Model weights saved to {path.with_suffix('.pt')}")
 
         # Save metadata
         metadata = {
@@ -160,9 +162,10 @@ class DQN(nn.Module):
 
         with open(path.with_suffix(".json"), "w") as f:
             json.dump(metadata, f, indent=4)
+        logger.info(f"Model metadata saved to {path.with_suffix('.json')}")
 
     @classmethod
-    def load_model(cls, path: Union[str, Path]) -> "DQN":
+    def load_model(cls, path: Union[str, Path], device: str) -> "DQN":
         """
         @brief Load a new DQN instance from saved weights and metadata.
 
@@ -173,6 +176,8 @@ class DQN(nn.Module):
 
         @param path Base path (without extension) from which to load the model.
                     Expected files are <path>.json for metadata and <path>.pt for weights.
+        @param device Device to load the model onto (e.g., 'cpu' or 'cuda').
+
         @return DQN instance with architecture and weights loaded.
         """
         path = Path(path)
@@ -201,8 +206,12 @@ class DQN(nn.Module):
                 "hidden_dims": metadata["hidden_dims"],
                 "enable_dueling_dqn": metadata["enable_dueling_dqn"]
             })
+        logger.debug(f"Loading the model weights from {weights_path}")
         model.load_state_dict(torch.load(weights_path))
+        model.to(device)
         model.eval()
+        # for name, param in model.named_parameters():
+        #     logger.debug(f"{name}: {param.data}")
         return model
 
 if __name__ == '__main__':
