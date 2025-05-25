@@ -89,7 +89,6 @@ class FrozenLakeAgent:
         self.episode_history = set()
         self.state_action_history = {}
 
-        # TODO: Add support for CUDA
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         set_seed(2025, use_cuda=torch.cuda.is_available())
         # Dimensions

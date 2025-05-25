@@ -29,7 +29,10 @@ class FrozenLakeMaps:
             raise ValueError(f"Failed to generate map of size {size}: {str(e)}")
 
     @staticmethod
-    def save_maps(maps_dict: Dict[str, List[str]], filepath: Union[str, Path], compress: bool = False) -> None:
+    def save_maps(maps_dict: Dict[str, List[str]],
+                  filepath: Union[str, Path],
+                  compress: bool = False,
+                  chunk_size: int = 1000) -> None:
         """
         Save a dictionary of maps to a JSON file (optionally compressed).
 
@@ -37,6 +40,7 @@ class FrozenLakeMaps:
             maps_dict: Dictionary of maps where keys are map IDs and values are map grids
             filepath: Path to save the file
             compress: Whether to compress the output file using gzip
+            chunk_size: Number of maps per chunk file
         """
         # Validate maps_dict structure
         for map_id, map_grid in maps_dict.items():
@@ -46,18 +50,25 @@ class FrozenLakeMaps:
                 raise TypeError(f"Map grid must be a list of strings for map ID {map_id}")
 
         filepath = Path(filepath)
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            if compress:
-                if not str(filepath).endswith(".gz"):
-                    filepath = filepath.with_suffix(filepath.suffix + ".gz")
-                with gzip.open(filepath, "wt", encoding="utf-8") as f:
-                    json.dump(maps_dict, f)
-            else:
-                with open(filepath, "w", encoding="utf-8") as f:
-                    json.dump(maps_dict, f)
-        except Exception as e:
-            raise IOError(f"Failed to save maps to {filepath}: {str(e)}")
+        base = filepath.stem
+        ext = ".json.gz" if compress else ".json"
+        out_dir = filepath.parent
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # Chunk and save
+        items = list(maps_dict.items())
+        for i in range(0, len(items), chunk_size):
+            chunk = dict(items[i:i + chunk_size])
+            chunk_filename = out_dir / f"{base}.{i // chunk_size}{ext}"
+            try:
+                if compress:
+                    with gzip.open(chunk_filename, "wt", encoding="utf-8") as f:
+                        json.dump(chunk, f)
+                else:
+                    with open(chunk_filename, "w", encoding="utf-8") as f:
+                        json.dump(chunk, f)
+            except Exception as e:
+                raise IOError(f"Failed to save chunk to {chunk_filename}: {str(e)}")
 
     @staticmethod
     def load_maps(filepath: Union[str, Path]) -> Dict[str, List[str]]:
