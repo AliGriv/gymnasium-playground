@@ -76,22 +76,36 @@ class FrozenLakeMaps:
         Load a dictionary of maps from a JSON or compressed JSON file.
 
         Args:
-            filepath: Path to the JSON file (may be gzip compressed if ending with .gz)
+            filepath: Path to the JSON file (may be gzip compressed if ending with .gz).
+                      Can be path to directory containing multiple files.
 
         Returns:
             Dictionary of maps where keys are map IDs and values are map grids
         """
+        def _load_single_file(file_path: Path) -> Dict[str, List[str]]:
+            try:
+                if str(file_path).endswith(".gz"):
+                    with gzip.open(file_path, "rt", encoding="utf-8") as f:
+                        maps_dict = json.load(f)
+                else:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        maps_dict = json.load(f)
+                return maps_dict
+            except Exception as e:
+                raise IOError(f"Failed to load maps from {file_path}: {str(e)}")
         filepath = Path(filepath)
-        try:
-            if str(filepath).endswith(".gz"):
-                with gzip.open(filepath, "rt", encoding="utf-8") as f:
-                    maps_dict = json.load(f)
-            else:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    maps_dict = json.load(f)
-            return maps_dict
-        except Exception as e:
-            raise IOError(f"Failed to load maps from {filepath}: {str(e)}")
+        if filepath.is_dir():
+            maps_dict = {}
+            for file in filepath.iterdir():
+                loaded_data = _load_single_file(file)
+                if loaded_data:
+                    maps_dict.update(loaded_data)
+        else:
+            maps_dict = _load_single_file(filepath)
+
+        return maps_dict
+
+
 
     @classmethod
     def generate_dataset(cls, num_maps: int, size: int, filepath: Union[str, Path],
