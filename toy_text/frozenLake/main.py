@@ -24,12 +24,12 @@ def run(train: bool,
         is_slippery: bool = False,
         enable_dqn_dueling: bool = False,
         enable_dqn_double: bool = False,
-        hidden_layer_dims: List[int] = [12],
+        hidden_layer_dims: List[int] = [64, 16],
         max_episode_steps: int = 500):
 
     # 1) Split into training and testing maps
-    # train_maps, test_maps = utils.split_dict(dataset, test_size) # TODO
-    train_maps, test_maps = dataset, dataset
+    train_maps, test_maps = utils.split_dict(dataset, test_size)
+    # train_maps, test_maps = dataset, dataset
     # 2) Normalize paths
     save_path = Path(model_save_path) if model_save_path else None
     load_path = Path(model_load_path) if model_load_path else None
@@ -50,9 +50,8 @@ def run(train: bool,
             hidden_layer_dims=hidden_layer_dims,
             max_episode_steps=max_episode_steps
         )
-        agent.run(
+        agent.train(
             num_episodes=episodes,
-            is_training=True,
             render=render
         )
         if plot:
@@ -81,9 +80,8 @@ def run(train: bool,
             hidden_layer_dims=hidden_layer_dims,
             max_episode_steps=max_episode_steps
         )
-        tester.run(
+        tester.evaluate(
             num_episodes=episodes,
-            is_training=False,
             render=render
         )
         logger.info("Testing complete.")
