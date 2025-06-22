@@ -55,7 +55,7 @@ class FrozenLakeAgent:
                  batch_size: int = 32,
                  enable_dqn_dueling: bool = False,
                  enable_dqn_double: bool = False,
-                 hidden_layer_dims: List[int] = [12],
+                 hidden_layer_dims: List[int] = [64, 16],
                  stop_on_reward: Optional[int] = 10000,
                  discount_factor: float = 0.95,
                  existing_dqn_path: Optional[Path] = None,
@@ -85,14 +85,16 @@ class FrozenLakeAgent:
         self.enable_dqn_dueling = enable_dqn_dueling
         self.save_interval = save_interval
         self.clip_grad_norm = clip_grad_norm
-        self.max_epsiode_steps = max_episode_steps
+        self.max_episode_steps = max_episode_steps
         self.episode_history = set()
         self.state_action_history = {}
+        self.q_net = None
+        self.target_net = None
 
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         set_seed(2025, use_cuda=torch.cuda.is_available())
         # Dimensions
-        state_dim = self.size**2 # TODO: Extend this
+        state_dim = 2*self.size**2 # TODO: Extend this
         action_dim = 4
 
 
@@ -177,149 +179,163 @@ class FrozenLakeAgent:
         logger.debug(f"  [Sync] – target network updated")
         self.target_net.load_state_dict(self.q_net.state_dict())
 
-    def run(self, num_episodes: Optional[int]=None, is_training: bool = True, render: bool = False):
-        # TODO: Add doxygen
+    def train(self,
+              num_trains: int = 20,
+              num_subtrains: int = 10,
+              map_batch_count: int = 5,
+              num_episodes: Optional[int] = None,
+              render: bool = False):
+        """Public API for training the agent."""
+        logger.info(f"Beginning training: up to {num_trains or '∞'} episodes")
+        # set up epsilon decay and target network
+        self._init_epsilon_decay(num_trains)
+        self.sync_target_network()
+        # delegate to internal loop
+        self._train_loop(num_trains, num_subtrains, map_batch_count, num_episodes, render)
 
-        logger.info(f"Running agent with policy network {self.q_net}")
+    def evaluate(self,
+                 num_episodes: Optional[int] = None,
+                 render: bool = False) -> List[float]:
+        """Public API for evaluating the agent."""
+        logger.info(f"Beginning evaluation: {num_episodes or 'all'} episodes")
+        return self._eval_loop(num_episodes, render)
 
-        if num_episodes:
-            self.epsilon_decay = (self.epsilon - self.final_epsilon) / (num_episodes * 0.95)
-        else:
-            self.epsilon_decay = (self.epsilon - self.final_epsilon) / 1000 # TODO: Avoid magic number
+    def _init_epsilon_decay(self, num_episodes: Optional[int]):
+        span = num_episodes * 0.95 if num_episodes else 1000  # TODO: Avoid magic number
+        self.epsilon_decay = (self.epsilon - self.final_epsilon) / span
+        logger.debug(f"  [Init] ε={self.epsilon:.3f}, ε_decay={self.epsilon_decay:.6f}, final ε={self.final_epsilon:.3f}")
 
-        if is_training:
-            start_time = datetime.now()
-            last_graph_update_time = start_time
+    def _get_map_order(self, shuffle: bool) -> List[List[str]]:
+        keys = list(self.maps.keys())
+        return [self.maps[i] for i in (random.sample(keys, len(keys)) if shuffle else keys)]
 
-            log_message = f"Training starting..."
-            logger.info(log_message)
-            with open(self.log_file, 'w') as file:
-                file.write(log_message + '\n')
-            logger.info(f"[Train Start]– "
-                f"{num_episodes or '∞'} episodes, lr={self.lr}, γ={self.discount_factor}, "
-                f"dueling={self.enable_dqn_dueling}, double={self.enable_dqn_double}")
+    def _make_env(self, desc: List[str], render: bool) -> gym.Env:
+        self.update_current_map(desc)
+        return gym.make(
+            'FrozenLake-v1',
+            desc=desc,
+            map_name="8x8" if self.size == 8 else "4x4",
+            is_slippery=self.is_slippery,
+            render_mode='human' if render else None,
+            max_episode_steps=self.max_episode_steps
+        )
 
-        desc = self.maps["0"] # TODO
-        self.env = gym.make('FrozenLake-v1',
-                       desc=desc,
-                       map_name="8x8" if self.size == 8 else "4x4",
-                       is_slippery=self.is_slippery,
-                       render_mode='human' if render else None,
-                       max_episode_steps=self.max_epsiode_steps)
-
-
-        # List to keep track of rewards collected per episode.
+    def _train_loop(self,
+                    num_trains: int,
+                    num_subtrains: int,
+                    map_batch_count: int,
+                    num_episodes: Optional[int],
+                    render: bool):
+        # shared preamble
+        logger.info(f"Training starting for up to {num_episodes or '∞'} episodes")
+        self.sync_target_network()
         rewards_per_episode = []
+        epsilon_history = []
+        best_reward = float("-inf")
+        step_count = super_step_count = 0
+        last_graph_time = datetime.now()
 
-        if is_training:
+        map_order = self._get_map_order(shuffle=True)
+        for train_round in range(num_trains):
+            for map_count, desc in enumerate(map_order, start=1):
+                self.env = self._make_env(desc, render)
+                # gather experience on this map
+                last_reward = self._run_episodes(self.env, desc, num_episodes, rewards_per_episode, is_training=True)
+                # maybe save best model
+                if last_reward > best_reward:
+                    self._save_best_model(last_reward, best_reward)
+                    best_reward = last_reward
+                # periodically train on replay memory
+                if len(self.memory) >= num_subtrains * self.batch_size:
+                    batches = self.memory.sample(self.batch_size, num_subtrains)
+                    for mb in batches:
+                        self.optimize(mb, self.q_net, self.target_net, super_step_count)
+                        step_count += 1
+                        super_step_count += 1
+                        if step_count > self.network_sync_rate:
+                            self.sync_target_network()
+                            step_count = 0
+                # maybe update graph
+                if datetime.now() - last_graph_time > timedelta(seconds=10):
+                    self.save_graph(rewards_per_episode, epsilon_history)
+                    epsilon_history.append(self.epsilon)
+                    last_graph_time = datetime.now()
+            self.decay_epsilon()
+            logger.info(f"Completed train round {train_round+1}/{num_trains}")
+            self.q_net.save_model(self.save_path)
+        # final save
+        self.q_net.save_model(self.save_path)
+        logger.info(f"Training complete. Model saved to {self.save_path}")
 
-            self.sync_target_network()
+    def _eval_loop(self,
+                   num_episodes: Optional[int],
+                   render: bool):
+        logger.info("Evaluation mode")
+        self.q_net.eval()
+        rewards = []
+        map_order = self._get_map_order(shuffle=False)
+        for desc in map_order:
+            self.env = self._make_env(desc, render)
+            last_reward = self._run_episodes(self.env, desc, num_episodes, rewards, is_training=False)
+        return rewards
 
-            # List to keep track of epsilon decay
-            epsilon_history = []
-
-            # Track number of steps taken. Used for syncing policy => target network.
-            step_count = 0
-            super_step_count = 0
-
-            # Track best reward
-            best_reward = -9999999
-        else:
-            logger.info(f"Putting model in evaluation mode")
-            self.q_net.eval()
-
-
-        # if num_upisodes is None, train INDEFINITELY,
-        # manually stop the run when you are satisfied (or unsatisfied) with the results
-        for episode in itertools.count():
-            self.episode_history.clear()
-            episode_memory = ReplayMemory(1000)
-            logger.debug(f"[Episode {episode:4d}] starting, ε={self.epsilon:.3f}")
-            if num_episodes and episode > num_episodes:
+    def _run_episodes(self,
+                      env: gym.Env,
+                      desc: List[str],
+                      max_episodes: Optional[int],
+                      rewards_acc: List[float],
+                      is_training: bool) -> float:
+        """
+        Run episodes on a single env/map. Returns last episode's reward.
+        Appends each episode_reward to rewards_acc.
+        """
+        episode = 0
+        last_reward = 0.0
+        while True:
+            if max_episodes is not None and episode >= max_episodes:
                 break
-            obs, info = self.env.reset()
-            new_obs = obs
+            obs, _ = env.reset()
             state = self.get_state(obs, desc)
-
-            terminated, truncated = False, False
+            episode_memory = ReplayMemory(1000)
+            terminated = False
             episode_reward = 0.0
-            # Perform actions until episode terminates or reaches max rewards
-            while(not terminated and episode_reward < self.stop_on_reward):
-                self.episode_history.add(obs)
+
+            while not terminated and episode_reward < self.stop_on_reward:
                 action = self.get_action(state)
-                if torch.is_tensor(action):
-                    action = action.item()
-                new_obs, reward, terminated, truncated, info = self.env.step(action)
+                new_obs, reward, terminated, truncated, _ = env.step(action)
                 reward = self.override_reward(obs, new_obs, reward, terminated)
-
-                if not is_training:
-                    logger.debug(f"  [Episode {episode:4d}] action={action}, obs={obs}, new_obs={new_obs}, reward={reward:.2f}, terminated={terminated}")
-                episode_reward += reward
-
                 next_state = self.get_state(new_obs, desc)
                 reward = torch.tensor(reward, dtype=torch.float, device=self.device)
 
                 if is_training:
+                    # store in both main memory and this episode
+                    self.memory.push(state, action, next_state, torch.tensor(reward, device=self.device), terminated)
+                    episode_memory.push(state, action, next_state, torch.tensor(reward, device=self.device), terminated)
 
-                    # Append to memory
-                    self.memory.push(state, action, next_state, reward, terminated)
-                    episode_memory.push(state, action, next_state, reward, terminated)
+                state, obs = next_state, new_obs
+                episode_reward += reward
 
-                    step_count+=1
-                    super_step_count += 1
-                    if super_step_count % 1000 == 0:
-                        logger.debug(f"  [Step {super_step_count:6d}] memory size={len(self.memory)}")
-
-
-                state = next_state
-                obs = new_obs
-
-
-            rewards_per_episode.append(episode_reward)
-            avg100 = np.mean(rewards_per_episode[-100:]) if len(rewards_per_episode) >= 100 else float('nan')
-            i = new_obs // self.size
-            j = new_obs % self.size
-            logger.debug(f"[Episode {episode:4d}] reward={episode_reward:.2f}, avg100={avg100:.2f}, ε={self.epsilon:.3f}, final location=({i}, {j}), terminated={terminated}, truncated={truncated}")
+            rewards_acc.append(float(episode_reward))
+            # if we reached goal, stash successful trajectory
             if is_training and new_obs == (self.size**2 - 1):
-                self.memory.push_success(episode_memory.states, episode_memory.actions, episode_memory.next_states, episode_memory.rewards, episode_memory.terminated)
-                episode_memory.clear()
+                self.memory.push_success(
+                    episode_memory.states,
+                    episode_memory.actions,
+                    episode_memory.next_states,
+                    episode_memory.rewards,
+                    episode_memory.terminated
+                )
+            episode += 1
+            last_reward = episode_reward
+        return last_reward
 
-
-            # Save model when new best reward is obtained.
-            if is_training:
-                if episode > self.save_interval:
-                    self.q_net.save_model(self.save_path)
-                if episode_reward > best_reward:
-                    if best_reward:
-                        log_message = f"New best reward {episode_reward:0.1f} ({(episode_reward-best_reward)/best_reward*100:+.1f}%) at episode {episode}, saving model..."
-                        logger.debug(log_message)
-                        with open(self.log_file, 'a') as file:
-                            file.write(log_message + '\n')
-                    best_reward = episode_reward
-
-
-                # Update graph every x seconds
-                current_time = datetime.now()
-                if current_time - last_graph_update_time > timedelta(seconds=10):
-                    self.save_graph(rewards_per_episode, epsilon_history)
-                    last_graph_update_time = current_time
-
-                # If enough experience has been collected
-                if len(self.memory) > self.batch_size:
-                    mini_batch = self.memory.sample(self.batch_size)
-                    self.optimize(mini_batch, self.q_net, self.target_net, super_step_count) # TODO
-
-                    epsilon_history.append(self.epsilon)
-                    if step_count > self.network_sync_rate:
-                        self.sync_target_network()
-                        step_count=0
-                self.decay_epsilon()
-
-        if is_training:
-            self.q_net.save_model(self.save_path)
-            logger.info(f"Training complete. Model saved to {self.save_path}")
-            # for name, param in self.q_net.named_parameters():
-            #     logger.debug(f"{name}: {param.data}")
+    def _save_best_model(self, new_reward: float, old_reward: float):
+        pct = (new_reward - old_reward)/old_reward*100 if old_reward != 0 else float("inf")
+        msg = f"New best reward {new_reward:.1f} ({pct:+.1f}%)—saving model."
+        logger.debug(msg)
+        with open(self.log_file, 'a') as f:
+            f.write(msg + "\n")
+        self.q_net.save_model(self.save_path)
 
     def save_graph(self, rewards_per_episode: List[float], epsilon_history: List[float]) -> None:
         """
@@ -360,10 +376,10 @@ class FrozenLakeAgent:
 
 
     def optimize(self,
-                mini_batch: Tuple[List[Tensor], List[int], List[Tensor], List[float], List[bool]],
-                policy_dqn: Module,
-                target_dqn: Module,
-                step_count: int) -> None: # TODO: Step count may be removed
+                 mini_batch: Tuple[List[Tensor], List[int], List[Tensor], List[float], List[bool]],
+                 policy_dqn: Module,
+                 target_dqn: Module,
+                 step_count: int) -> None: # TODO: Step count may be removed
         """
         @brief Performs a single optimization step on the policy DQN using a mini-batch of experiences.
 
@@ -423,17 +439,22 @@ class FrozenLakeAgent:
         self.optimizer.step()       # Update network parameters i.e. weights and biases
 
 
+    def update_current_map(self, map: List[str]):
+
+        self.current_map =  map
+        self.current_map_state = torch.zeros(2*self.size**2, dtype=torch.float32, device=self.device)
+        for i in range(self.size):
+            for j in range(self.size):
+                if not map[i][j] == 'H':
+                    self.current_map_state[self.size**2 + i*self.size + j] = 1.0
+
+
     def get_state(self, obs: int, map: List[str]):
         """
         Convert the observation to a state tensor.
         """
-        state = torch.zeros(self.size**2, dtype=torch.float32, device=self.device)
+        state = self.current_map_state.clone()
         state[obs] = 1.0
-        # TODO: Generalize the state representation
-        # for i in range(self.size):
-        #     for j in range(self.size):
-        #         if not map[i][j] == 'H':
-        #             state[self.size**2 + i*self.size + j] = 1.0
         return state
 
 

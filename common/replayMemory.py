@@ -68,7 +68,7 @@ class ReplayMemory:
         self.success_rewards.extend(rewards)
         self.success_terminated.extend(terminateds)
 
-    def sample(self, sample_size: int, success_ratio: float = 0.50) -> Tuple[List[Any], List[Any], List[Any], List[float], List[bool]]:
+    def sample(self, sample_size: int, num_batches: int = 1, success_ratio: float = 0.50) -> Tuple[List[Any], List[Any], List[Any], List[float], List[bool]]:
         """
         @brief Randomly samples a batch of transitions from the memory, optionally including success transitions.
 
@@ -76,35 +76,53 @@ class ReplayMemory:
         @param success_ratio Proportion of samples to draw from success memory (default: 0.5).
         @return A tuple containing lists of (states, actions, next_states, rewards, terminated_flags).
         """
-        success_count = int(sample_size * success_ratio)
-        regular_count = sample_size - success_count
+        if num_batches <= 0:
+            raise ValueError("Number of batches must be at least 1.")
+        success_count = int(sample_size * num_batches * success_ratio)
+        regular_count = sample_size * num_batches - success_count
 
         success_len = len(self.success_states)
         main_len = len(self)
 
+        # TODO: Re-write all of this
+        def _get_batch(indices_list: List[int]):
+            return (
+                    [self.states[i] for i in indices_list],
+                    [self.actions[i] for i in indices_list],
+                    [self.next_states[i] for i in indices_list],
+                    [self.rewards[i] for i in indices_list],
+                    [self.terminated[i] for i in indices_list],
+                )
         # If not enough success samples, fall back to only regular memory
         if success_len < success_count:
             indices = random.sample(range(main_len), sample_size)
-            return (
-                [self.states[i] for i in indices],
-                [self.actions[i] for i in indices],
-                [self.next_states[i] for i in indices],
-                [self.rewards[i] for i in indices],
-                [self.terminated[i] for i in indices],
-            )
+            if num_batches == 1:
+                return _get_batch(indices)
+            else:
+                batch_indices = [indices[i::num_batches] for i in range(num_batches)]
+                return [_get_batch(ind) for ind in batch_indices]
+
 
         # Otherwise, mix success and regular samples
         success_indices = random.sample(range(success_len), success_count)
         regular_indices = random.sample(range(main_len), regular_count)
 
-        states = [self.success_states[i] for i in success_indices] + [self.states[i] for i in regular_indices]
-        actions = [self.success_actions[i] for i in success_indices] + [self.actions[i] for i in regular_indices]
-        next_states = [self.success_next_states[i] for i in success_indices] + [self.next_states[i] for i in regular_indices]
-        rewards = [2.0*self.success_rewards[i] for i in success_indices] + [self.rewards[i] for i in regular_indices]
-        terminated_flags = [self.success_terminated[i] for i in success_indices] + [self.terminated[i] for i in regular_indices]
-        logger.debug(f"[Sampled] {len(success_indices)} from success, {len(regular_indices)} from regular")
-        return states, actions, next_states, rewards, terminated_flags
+        def _get_batch_with_success(suc_ind, reg_ind):
+            states = [self.success_states[i] for i in suc_ind] + [self.states[i] for i in reg_ind]
+            actions = [self.success_actions[i] for i in suc_ind] + [self.actions[i] for i in reg_ind]
+            next_states = [self.success_next_states[i] for i in suc_ind] + [self.next_states[i] for i in reg_ind]
+            rewards = [2.0*self.success_rewards[i] for i in suc_ind] + [self.rewards[i] for i in reg_ind]
+            terminated_flags = [self.success_terminated[i] for i in suc_ind] + [self.terminated[i] for i in reg_ind]
 
+            return states, actions, next_states, rewards, terminated_flags
+
+        logger.debug(f"[Sampled] {len(success_indices)} from success, {len(regular_indices)} from regular")
+        if num_batches == 1:
+            return _get_batch_with_success(success_indices, regular_indices)
+        else:
+            success_split = [success_indices[i::num_batches] for i in range(num_batches)]
+            regular_split = [regular_indices[i::num_batches] for i in range(num_batches)]
+            return [_get_batch_with_success(s, r) for s, r in zip(success_split, regular_split)]
 
     def clear(self, include_success: bool = False) -> None:
         """
@@ -130,3 +148,6 @@ class ReplayMemory:
         @return Number of stored transitions.
         """
         return len(self.states)
+
+    def describe(self) -> str:
+        return f"Main Memory: {len(self.states)}, Success Memory: {len(self.success_states)}"
