@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 from pathlib import Path
 import gymnasium as gym
-import toy_text.utils as utils
+import common.utils as utils
 from typing import Dict, List
 from common.loggerConfig import logger
 

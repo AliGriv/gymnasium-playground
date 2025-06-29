@@ -15,7 +15,7 @@ from torch.nn import Module
 
 from common.dqn import DQN
 from common.replayMemory import ReplayMemory
-from toy_text.utils import get_moving_avgs
+from common.utils import get_moving_avgs
 from common.loggerConfig import logger
 
 

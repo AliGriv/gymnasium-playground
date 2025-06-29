@@ -1,5 +1,5 @@
 from tqdm import tqdm
-from toy_text.taxi.taxiAgent import *
+from classic_control.mountain_car.mountainCarAgent import *
 from matplotlib import pyplot as plt
 from pathlib import Path
 import common.utils as utils
@@ -20,7 +20,7 @@ def run(
     plot: bool = True
 ):
     """
-    @brief Entry point for training and testing a Q-learning agent on the Taxi-v3 environment.
+    @brief Entry point for training and testing a Q-learning agent on the MountainCar-v0 environment.
 
     Initializes the environment and agent, handles model loading/saving, and executes training
     and/or testing episodes. Optionally renders the environment and plots results.
@@ -37,19 +37,19 @@ def run(
     @param plot Whether to plot training statistics (rewards and errors).
     """
 
-    env = gym.make('Taxi-v3', render_mode='human' if render else None)
+    env = gym.make('MountainCar-v0', render_mode="human" if render else None)
     env = gym.wrappers.RecordEpisodeStatistics(env, buffer_length=episodes)
 
     if model_load_path:
         model_load_path = Path(model_load_path)
     existing_model = utils.load_existing_model(model_load_path)
 
-    agent = TaxiAgent(env,
-                      learning_rate,
-                      start_epsilon,
-                      epsilon_decay,
-                      final_epsilon=0.0,
-                      existing_q=existing_model)
+    agent = MountainCarAgent(env,
+                             learning_rate,
+                             start_epsilon,
+                             epsilon_decay,
+                             final_epsilon=0.0,
+                             existing_q=existing_model)
 
 
     def run_episodes(num_episodes, is_train=True):
@@ -71,9 +71,9 @@ def run(
                 agent.update(obs, action, reward, terminated, next_obs)
 
                 # update if the environment is done and the current obs
-                done = terminated or truncated
                 obs = next_obs
                 rewards += reward
+                done = terminated or rewards <= -1000
 
             if is_train:
                 agent.decay_epsilon()
@@ -120,7 +120,7 @@ def run(
         plt.plot(sum_rewards)
         plt.title(f"Rewards Summation for every 100 Episodes")
         plt.grid()
-        plt.savefig(model_save_path.parent / 'taxi_v3_5x5_rewards.png')
+        plt.savefig(model_save_path.parent / 'mountain_car_rewards.png')
 
 
         plt.figure(2)
@@ -130,7 +130,7 @@ def run(
             rolling_length,
             "same"
         )
-        plt.title(f"Training error for Taxi model")
+        plt.title(f"Training error for Mountain Car model")
         plt.plot(training_error_moving_average)
-        plt.savefig('taxi_v3_5x5_training_error.png')
+        plt.savefig('mountain_car_training_error.png')
 
