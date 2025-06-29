@@ -2,7 +2,7 @@ from tqdm import tqdm
 from toy_text.taxi.taxiAgent import *
 from matplotlib import pyplot as plt
 from pathlib import Path
-import toy_text.utils as utils
+import common.utils as utils
 from common.loggerConfig import logger
 
 
