@@ -63,7 +63,7 @@ def run(
             obs, info = env.reset()
             done = False
             rewards = 0
-            while not done or rewards > -1000:
+            while not done:
                 action = agent.get_action(obs)
                 next_obs, reward, terminated, truncated, info = env.step(action)
 
@@ -71,9 +71,9 @@ def run(
                 agent.update(obs, action, reward, terminated, next_obs)
 
                 # update if the environment is done and the current obs
-                done = terminated or truncated
                 obs = next_obs
                 rewards += reward
+                done = terminated or rewards <= -1000
 
             if is_train:
                 agent.decay_epsilon()
