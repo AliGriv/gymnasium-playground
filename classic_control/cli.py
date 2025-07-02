@@ -14,12 +14,13 @@ def cli():
 @click.option('--model-save-path', default='models/classic_control/mountain_car.pkl', help='Where to save the pickel model (used in training)')
 @click.option('--model-load-path', help='Path to pickel load model from, in test-only mode it is required')
 @click.option('--render', is_flag=True, help='Render the environment')
-@click.option('--learning-rate', default=0.9, type=float, help='Learning rate')
+@click.option('--learning-rate', default=0.999, type=float, help='Learning rate')
 @click.option('--epsilon', type=float, default=1.0, help='Starting epsilon (will be 0 in test mode)')
-@click.option('--epsilon-decay', type=float, help='Epsilon decay rate (default: epsilon / (episodes / 2))')
+@click.option('--epsilon-decay', type=float, help='Epsilon decay rate (default: epsilon / (episodes * 0.8))')
 @click.option('--episodes', type=int, required=True, help='Number of episodes to run')
 @click.option('--plot', is_flag=True, help='Plot some statistics from training procedure')
-def mountain_car(train, test, model_save_path, model_load_path, render, learning_rate, epsilon, epsilon_decay, episodes, plot):
+@click.option('--cont-actions', is_flag=True, help='Use continuous actions model (defaultuses discrete actions space).')
+def mountain_car(train, test, model_save_path, model_load_path, render, learning_rate, epsilon, epsilon_decay, episodes, plot, cont_actions):
     """Run the Taxi experiment"""
 
     if not train and not test:
@@ -31,7 +32,7 @@ def mountain_car(train, test, model_save_path, model_load_path, render, learning
         epsilon = 0.0
 
     if epsilon_decay is None:
-        epsilon_decay = epsilon / (episodes / 2)
+        epsilon_decay = epsilon / (episodes * 0.8)
 
     if plot and not train:
         plot = False
@@ -52,6 +53,7 @@ def mountain_car(train, test, model_save_path, model_load_path, render, learning
     logger.info(f"  Render: {render}")
     logger.info(f"  Learning Rate: {learning_rate}")
     logger.info(f"  Plots: {plot}")
+    logger.info(f"  Continuous Actions: {cont_actions}")
 
     # Call your training or testing function here
     run_mountain_car(
@@ -64,5 +66,6 @@ def mountain_car(train, test, model_save_path, model_load_path, render, learning
         epsilon_decay=epsilon_decay,
         model_save_path=model_save_path,
         model_load_path=model_load_path,
-        plot=plot
+        plot=plot,
+        cont_actions=cont_actions
     )

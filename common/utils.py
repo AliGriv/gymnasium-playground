@@ -4,6 +4,7 @@ import pickle
 from typing import Any, Dict, Tuple
 import random
 from common.loggerConfig import logger
+import json
 
 def get_moving_avgs(arr, window, convolution_mode):
     flat = np.array(arr, dtype=float).flatten()
@@ -18,11 +19,48 @@ def load_existing_model(model_path: Path) -> np.ndarray:
             f = open(model_path, 'rb')
             model = pickle.load(f)
             f.close()
+            logger.info(f"Model loaded from {model_path}")
+            if isinstance(model, np.ndarray):
+                logger.info(f"Model shape: {model.shape}")
         except Exception as e:
             logger.exception(f"Exception occured while loading {model_path}: {e}")
     elif model_path:
         logger.error(f"Provided path does not exists: {model_path}")
     return model
+
+def load_existing_model_metadata(model_path: Path) -> Dict[str, Any]:
+    """
+    Load and return the metadata JSON for a given model file.
+
+    The metadata is expected to live alongside the model file with a .json suffix.
+    E.g., "foo.pt" → "foo.json".
+
+    Raises:
+        FileNotFoundError: if the .json metadata file does not exist.
+        json.JSONDecodeError: if the file exists but is not valid JSON.
+    """
+    if model_path is None:
+        return {}
+    meta_data_path = model_path.with_suffix('.json')
+    if not meta_data_path.exists():
+        logger.warning(f"Metadata file not found: {meta_data_path}")
+        return {}
+
+    with meta_data_path.open('r', encoding='utf-8') as f:
+        metadata = json.load(f)
+
+    logger.info(f"Loaded metadata from {meta_data_path}: {metadata}")
+    return metadata
+
+def save_trained_model_metadata(model_path: Path, metadata: Dict):
+    meta_data_path = model_path.with_suffix('.json')
+    # ensure the directory exists
+    meta_data_path.parent.mkdir(parents=True, exist_ok=True)
+    # write out the JSON
+    with meta_data_path.open('w', encoding='utf-8') as f:
+        json.dump(metadata, f, indent=2, sort_keys=True)
+
+    logger.info(f"Model metdata saved into {meta_data_path}: {metadata}")
 
 def save_trained_model(model_path: Path, model: Any):
 
