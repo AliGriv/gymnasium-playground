@@ -1,0 +1,6 @@
+{
+  "cont_actions": true,
+  "num_actions_bins": 25,
+  "num_position_bins": 20,
+  "num_velocity_bins": 20
+}
