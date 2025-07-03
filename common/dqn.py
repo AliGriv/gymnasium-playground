@@ -74,7 +74,7 @@ class DQN(nn.Module):
         """
         if not hidden_dims:
             return []
-        return [nn.Linear(hidden_dims[i], hidden_dims[i+1]) for i in range(len(hidden_dims)-1)]
+        return nn.ModuleList([nn.Linear(hidden_dims[i], hidden_dims[i+1]) for i in range(len(hidden_dims)-1)])
 
     def forward(self, x):
         """

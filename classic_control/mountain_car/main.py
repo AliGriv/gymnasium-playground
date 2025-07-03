@@ -1,11 +1,12 @@
 from tqdm import tqdm
 from classic_control.mountain_car.mountainCarAgent import *
 from classic_control.mountain_car.mountainCarContAgent import *
+from classic_control.mountain_car.mountainCarDqn import *
 from matplotlib import pyplot as plt
 from pathlib import Path
 import common.utils as utils
 from common.loggerConfig import logger
-
+from typing import List
 
 
 def run(
@@ -208,3 +209,71 @@ def run(
         except Exception:
             logger.exception("Failed to generate the plots.")
 
+
+def run_dqn(
+    train: bool,
+    test: bool,
+    episodes: int,
+    render: bool,
+    learning_rate: float,
+    start_epsilon: float,
+    epsilon_decay: float,
+    model_save_path: str,
+    model_load_path: str = None,
+    plot: bool = True,
+    enable_dqn_dueling: bool = False,
+    enable_dqn_double: bool = False,
+    hidden_layer_dims: List = [12, 4],
+    max_episode_steps: int = 500
+):
+
+    save_path = Path(model_save_path) if model_save_path else None
+    load_path = Path(model_load_path) if model_load_path else None
+
+    # We are targeting the continuous action space only
+    env = gym.make('MountainCarContinuous-v0', render_mode="human" if render else None)
+
+    if train:
+        logger.info(f"=== Starting training for {episodes} episodes ===")
+        agent = MountainCarDQNAgent(
+            env=env,
+            learning_rate=learning_rate,
+            initial_epsilon=start_epsilon,
+            epsilon_decay=epsilon_decay,
+            existing_dqn_path=load_path,
+            save_dqn_path=save_path,
+            enable_dueling=enable_dqn_dueling,
+            enable_double=enable_dqn_double,
+            hidden_layer_dims=hidden_layer_dims,
+            max_episode_steps=max_episode_steps
+        )
+        agent.train(
+            num_episodes=episodes
+        )
+        if plot:
+            # the agent’s run method already calls save_graph periodically,
+            # and leaves the final plot at agent.graph_file
+            logger.info(f"Training complete. Graph saved to {agent.graph_file}")
+
+    if test:
+        load_for_test = save_path or load_path
+        if load_for_test is None or not load_for_test.exists():
+            raise FileNotFoundError(f"No model file found at {load_for_test!r} to load for test run")
+
+        logger.info(f"==== Starting evaluation of Mountain Car DQN for {episodes} episodes ====")
+        tester = MountainCarDQNAgent(
+            env=env,
+            learning_rate=learning_rate,
+            initial_epsilon=0.0,  # Epsilon is 0 in test mode
+            epsilon_decay=epsilon_decay,
+            existing_dqn_path=load_for_test,
+            save_dqn_path=None,  # No need to save during testing
+            enable_dueling=enable_dqn_dueling,
+            enable_double=enable_dqn_double,
+            hidden_layer_dims=hidden_layer_dims,
+            max_episode_steps=max_episode_steps
+        )
+        tester.evaluate(
+            num_episodes=episodes
+        )
+        logger.info("Testing complete.")

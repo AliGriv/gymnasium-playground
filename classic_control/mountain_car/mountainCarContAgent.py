@@ -60,7 +60,7 @@ class MountainCarContAgent:
         self.vel_bins = np.linspace(-0.07, 0.07, velocity_bins)
         self.act_bins = np.linspace(-1.0, 1.0, actions_bins)
 
-    def get_action(self, obs: int) -> int:
+    def get_action(self, obs: np.ndarray) -> np.ndarray:
         """
         @brief Selects an action using an epsilon-greedy policy.
 
@@ -104,7 +104,8 @@ class MountainCarContAgent:
         self.q_values[state_p, state_v, action_index] = (
             self.q_values[state_p, state_v, action_index] + self.lr * temporal_difference
         )
-        self.training_error.append(temporal_difference)
+
+        self.training_error.append(temporal_difference.item() if isinstance(temporal_difference, np.ndarray) else temporal_difference)
 
     def rewind_episode(self, episode_history: list, last_reward_influence: float = 0.98):
         last_item = episode_history[-1]
