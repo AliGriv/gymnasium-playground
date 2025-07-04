@@ -7,7 +7,7 @@ import torch.optim as optim
 from torch import Tensor
 from torch.nn import Module
 from common.loggerConfig import logger
-from common.dqn import DQN
+from common.dnnActorCritic import DnnActorCritic
 from common.replayMemory import ReplayMemory
 from copy import deepcopy
 from datetime import datetime, timedelta
@@ -16,43 +16,43 @@ import matplotlib.pyplot as plt
 from common.utils import get_moving_avgs
 
 
-class MountainCarDQNAgent:
+class MountainCarDNNAgent:
 
     def __init__(self,
                  env: gym.Env,
-                 learning_rate: float,
+                 policy_learning_rate: float,
+                 quality_learning_rate: float,
                  initial_epsilon: float,
                  epsilon_decay: float = None,
-                 existing_dqn_path: Path = None,
-                 save_dqn_path: Path = None,
-                 network_sync_rate: int = 500,
+                 existing_model_path: Path = None,
+                 save_path: Path = None,
+                 update_rate: int = 50,
                  replay_memory_size: int = 30000,
                  discount_factor: float = 0.9,
                  optimizer: str = "adam",
                  log_directory: str = "logs/mountainCarDqn",
                  batch_size: int = 32,
-                 enable_dueling: bool = False,
-                 enable_double: bool = False,
                  hidden_layer_dims: List[int] = [12, 4],
                  max_episode_steps: int = 500,
-                 clip_grad_norm: float = 1.0,
-                 save_interval: int = 500):
+                 save_interval: int = 500,
+                 action_noise: float = 0.1,
+                 polyak_coefficient: float = 0.995):
 
         self.env = env
 
-        self.lr = learning_rate
+        self.pi_lr = policy_learning_rate
+        self.q_lr = quality_learning_rate
         self.discount_factor = discount_factor
+        self.action_noise = action_noise
+        self.polyak =  polyak_coefficient
 
         self.epsilon = initial_epsilon
         self.epsilon_decay = epsilon_decay
         self.final_epsilon = 0.0
 
-        self.network_sync_rate = network_sync_rate
+        self.update_rate = update_rate
         self.batch_size = batch_size
-        self.enable_dqn_double = enable_double
-        self.enable_dqn_dueling = enable_dueling
         self.save_interval = save_interval
-        self.clip_grad_norm = clip_grad_norm
         self.max_episode_steps = max_episode_steps
 
 
@@ -62,51 +62,50 @@ class MountainCarDQNAgent:
 
         self.state_dim = env.observation_space.shape[0]
         self.action_dim = env.action_space.shape[0]
+        self.action_limit = env.action_space.high[0]
 
-        self.save_path = save_dqn_path
-        if save_dqn_path and not isinstance(save_dqn_path, Path):
-            self.save_path =  Path(save_dqn_path)
+        self.save_path = save_path
+        if save_path and not isinstance(save_path, Path):
+            self.save_path =  Path(save_path)
 
             self.save_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # TODO
         # Load existing model if provided
-        if isinstance(existing_dqn_path, str):
-            existing_dqn_path = Path(existing_dqn_path)
-        if existing_dqn_path and existing_dqn_path.exists():
+        if isinstance(existing_model_path, str):
+            existing_model_path = Path(existing_model_path)
+        if existing_model_path and existing_model_path.exists():
             try:
-                q_net = DQN.load_model(existing_dqn_path, self.device) #TODO: Remove this device
-                self.q_net = q_net
+                ac_net = DnnActorCritic.load_model(existing_model_path, self.device) #TODO: Remove this device
+                self.ac_net = ac_net
             except Exception as e:
-                logger.warning(f"Faield to load the model from {existing_dqn_path}: {e}")
+                logger.warning(f"Failed to load the model from {existing_model_path}: {e}")
                 logger.info(f"Switching to default model.")
-                self.q_net.load_state_dict(torch.load(existing_dqn_path))
-                logger.info(f"Loaded existing DQN from {existing_dqn_path}")
-            self.target_net = deepcopy(self.q_net)
+                self.ac_net.load_state_dict(torch.load(existing_model_path))
+                logger.info(f"Loaded existing DQN from {existing_model_path}")
+            self.target_net = deepcopy(self.ac_net)
             self.target_net.to(self.device)
 
         else:
             # DQN and target network
-            self.q_net = DQN(state_dim=self.state_dim,
-                             action_dim=self.action_dim,
-                             hidden_dims=hidden_layer_dims,
-                             enable_dueling_dqn=self.enable_dqn_dueling,
-                             tanh_output=False)
+            self.ac_net = DnnActorCritic(state_dim=self.state_dim,
+                                        action_dim=self.action_dim,
+                                        hidden_dims=hidden_layer_dims,
+                                        action_limit=self.action_limit,
+                                        device=self.device)
 
-            self.target_net = DQN(state_dim=self.state_dim,
-                                  action_dim=self.action_dim,
-                                  hidden_dims=hidden_layer_dims,
-                                  enable_dueling_dqn=self.enable_dqn_dueling,
-                                  tanh_output=False)
+            self.target_net = deepcopy(self.ac_net)
 
-            self.q_net.to(self.device)
+            self.ac_net.to(self.device)
             self.target_net.to(self.device)
 
         # Freeze target networks with respect to optimizers (only update via polyak averaging)
         for param in self.target_net.parameters():
             param.requires_grad = False
 
-        # Optimizer
-        self.optimizer = self.get_optimizer(optimizer, self.q_net.parameters(), lr=self.lr)
+        # Optimizer for policy and Q function
+        self.pi_optimizer = self.get_optimizer(optimizer, self.ac_net.pi.parameters(), lr=self.pi_lr)
+        self.q_optimizer = self.get_optimizer(optimizer, self.ac_net.q.parameters(), lr=self.q_lr)
         # Loss Function
         self.loss_fn = torch.nn.MSELoss()
 
@@ -116,6 +115,41 @@ class MountainCarDQNAgent:
 
         self.graph_file = Path(log_directory) / 'mountainCarDQN.png'
         self.graph_file.parent.mkdir(parents=True, exist_ok=True)
+
+    def compute_quality_loss(self,
+                             states: torch.Tensor,
+                             actions: torch.Tensor,
+                             rewards: torch.Tensor,
+                             next_states: torch.Tensor,
+                             terminated: torch.Tensor) -> torch.Tensor:
+        """
+        Method for computing DDPG Q-loss
+        """
+        # TODO: Add doxygen
+        q_value = self.ac_net.q(states, actions)
+
+        # Bellman backup for Q function
+        with torch.no_grad():
+            q_pi_targ = self.target_net.q(next_states, self.target_net.pi(next_states))
+            backup = rewards + self.discount_factor * (1 - terminated) * q_pi_targ
+
+        # MSE loss against Bellman backup
+        loss_q = ((q_value - backup)**2).mean()
+
+        # Useful info for logging
+        loss_info = dict(QVals=q_value.detach().numpy())
+
+        return loss_q, loss_info
+
+    def compute_policy_loss(self,
+                            states: torch.Tensor) -> torch.Tensor:
+        """
+        Method for computing DDPG policy loss
+        """
+
+        # TODO: Add doxygen
+
+        return -self.ac_net.q(states, self.ac_net.pi(states)).mean()
 
     def get_optimizer(self, optimizer: str, model_parameters, lr: float):
         # TODO: Add doxygen
@@ -141,22 +175,16 @@ class MountainCarDQNAgent:
         else:
             with torch.no_grad():
                 state_t, = self._as_tensor(self._normalize_state(state))
-                q_value = self.q_net(state_t)
-                return q_value.cpu().numpy()
+                a = self.ac_net.act(state_t)
+                a += self.action_noise * np.random.randn(self.action_dim)
+                return np.clip(a, -self.action_limit, self.action_limit)
 
     def decay_epsilon(self):
         # TODO: Add doxygen
         self.epsilon = max(self.final_epsilon, self.epsilon - self.epsilon_decay)
 
-    def sync_target_network(self):
-        # TODO: Add doxygen
-        logger.debug(f"  [Sync] – target network updated")
-        self.target_net.load_state_dict(self.q_net.state_dict())
-
     def optimize(self,
-                mini_batch: Tuple[List[Tensor], List[int], List[Tensor], List[float], List[bool]],
-                policy_dqn: Module,
-                target_dqn: Module) -> None: # TODO: Step count may be removed
+                 mini_batch: Tuple[List[Tensor], List[int], List[Tensor], List[float], List[bool]]) -> None:
         """
         @brief Performs a single optimization step on the policy DQN using a mini-batch of experiences.
 
@@ -169,9 +197,6 @@ class MountainCarDQNAgent:
                         - new_states: List of tensors representing resulting states.
                         - rewards: List of floats representing rewards received.
                         - terminations: List of booleans indicating if the episode terminated.
-
-        @param policy_dqn The DQN model currently being trained (policy network).
-        @param target_dqn The target DQN used for estimating future Q-values.
 
         @return None
         """
@@ -187,30 +212,36 @@ class MountainCarDQNAgent:
         rewards = torch.as_tensor([reward for reward in rewards], dtype=torch.float32, device=self.device).unsqueeze(1)
         terminations = torch.as_tensor([t for t in terminations], dtype=torch.float32, device=self.device).unsqueeze(1)
 
+        # First run one gradient descent step for Q.
+        self.q_optimizer.zero_grad()
+        loss_q, loss_info = self.compute_quality_loss(states, actions, rewards, new_states, terminations)
+        loss_q.backward()
+        self.q_optimizer.step()
 
+        # Freeze Q-network so you don't waste computational effort
+        # computing gradients for it during the policy learning step.
+        for param in self.ac_net.q.parameters():
+            param.requires_grad = False
+
+        # Next run one gradient descent step for pi.
+        self.pi_optimizer.zero_grad()
+        loss_pi = self.compute_policy_loss(states, actions, rewards, new_states, terminations)
+        loss_pi.backward()
+        self.pi_optimizer.step()
+
+        # Unfreeze Q-network so you can optimize it at next DDPG step.
+        for param in self.ac_net.q.parameters():
+            param.requires_grad = True
+
+        logger.debug(f"   [Optimize] - Loss Q {loss_q.item():.4f}, Loss Pi {loss_pi.item():.4f}, Loss Info: {loss_info}")
+
+        # Finally, update target networks by polyak averaging.
         with torch.no_grad():
-            if self.enable_dqn_double:
-                best_actions_from_policy = policy_dqn(new_states)
-
-                target_q = rewards + (1-terminations) * self.discount_factor * \
-                                target_dqn(new_states).gather(dim=1, index=best_actions_from_policy.unsqueeze(dim=1)).squeeze()
-            else:
-                target_q = rewards + (1-terminations) * self.discount_factor * target_dqn(new_states)
-
-
-
-        current_q = policy_dqn(states)
-
-        # Compute loss
-        loss = self.loss_fn(current_q, target_q)
-        # every N steps or batches
-        logger.debug(f"  [Optimize] loss={loss.item():.4f}, ε={self.epsilon:.3f}")
-
-        # Optimize the model (backpropagation)
-        self.optimizer.zero_grad()  # Clear gradients
-        loss.backward()             # Compute gradients
-        torch.nn.utils.clip_grad_norm_(self.q_net.parameters(), self.clip_grad_norm) # TODO: Do I really need this?
-        self.optimizer.step()       # Update network parameters i.e. weights and biases
+            for ac_param, target_param in zip(self.ac_net.parameters(), self.target_net.parameters()):
+                # NB: We use an in-place operations "mul_", "add_" to update target
+                # params, as opposed to "mul" and "add", which would make new tensors.
+                target_param.data.mul_(self.polyak)
+                target_param.data.add_((1 - self.polyak) * ac_param.data)
 
     def train(self,
               num_episodes: int):
@@ -225,17 +256,16 @@ class MountainCarDQNAgent:
         last_graph_update_time = start_time
 
         logger.info(f"[Train Start]– "
-            f"{num_episodes or '∞'} episodes, lr={self.lr}, γ={self.discount_factor}, "
-            f"dueling={self.enable_dqn_dueling}, double={self.enable_dqn_double}")
+            f"{num_episodes or '∞'} episodes, policy lr={self.pi_lr}, quality lr={self.q_lr} γ={self.discount_factor}")
 
         rewards_per_episode = []
         epsilon_history = []
         best_reward = float("-inf")
-        self.sync_target_network()
-        sync_count = 0
+        update_count = 0
         save_count = 0
         for episode in range(num_episodes):
             state, info = self.env.reset()
+            update_count += 1
             next_state = state
             terminated, truncated = False, False
             episode_reward, reward = 0.0, 0.0
@@ -273,14 +303,11 @@ class MountainCarDQNAgent:
 
             episode_memory.clear()
 
-            if len(self.memory) > self.batch_size:
-                mini_batch = self.memory.sample(self.batch_size)
-                self.optimize(mini_batch, self.q_net, self.target_net)
-                sync_count += 1
+            if len(self.memory) > self.batch_size and update_count % self.update_rate == 0:
 
-                if sync_count > self.network_sync_rate:
-                    self.sync_target_network()
-                    sync_count=0
+                for _ in range(self.update_rate):
+                    mini_batch = self.memory.sample(self.batch_size)
+                    self.optimize(mini_batch, self.ac_net, self.target_net)
 
             # Update graph every x seconds
             current_time = datetime.now()
@@ -291,16 +318,15 @@ class MountainCarDQNAgent:
             if episode_reward > best_reward:
                 best_reward = episode_reward
                 logger.info(f"New best reward: {best_reward} at episode {episode + 1}")
-                self.q_net.save_model(self.save_path)
+                self.ac_net.save_model(self.save_path)
             self.decay_epsilon()
             if save_count >= self.save_interval:
-                save_count = 1
-                self.q_net.save_model(self.save_path)
-            else:
-                save_count += 1
+                save_count = 0
+                self.ac_net.save_model(self.save_path)
+            save_count += 1
 
 
-        self.q_net.save_model(self.save_path)
+        self.ac_net.save_model(self.save_path)
         logger.info(f"Training complete. Model saved to {self.save_path}")
 
 
@@ -358,8 +384,10 @@ class MountainCarDQNAgent:
 
     def evaluate(self, num_episodes: int):
         logger.info(f"Beginning evaluation: {num_episodes} episodes")
-        self.q_net.eval()
+        self.ac_net.eval()
         logger.debug(f"Evaluation mode enabled.")
+        if not self.action_noise == 0.0:
+            self.action_noise = 0.0
         self.epsilon = 0.0
         rewards_per_episode = []
         terminated_per_episode = []

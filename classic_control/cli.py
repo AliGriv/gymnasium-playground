@@ -77,7 +77,8 @@ def mountain_car(train, test, model_save_path, model_load_path, render, learning
 @click.option('--model-save-path', default='models/classic_control/mountain_car_dqn.pt', help='Where to save the pickel model (used in training)')
 @click.option('--model-load-path', help='Path to pickel load model from, in test-only mode it is required')
 @click.option('--render', is_flag=True, help='Render the environment')
-@click.option('--learning-rate', default=0.999, type=float, help='Learning rate')
+@click.option('--policy-learning-rate', default=0.9, type=float, help='Policy earning rate')
+@click.option('--quality-learning-rate', default=0.9, type=float, help='Policy earning rate')
 @click.option('--epsilon', type=float, default=1.0, help='Starting epsilon (will be 0 in test mode)')
 @click.option('--epsilon-decay', type=float, help='Epsilon decay rate (default: epsilon / (episodes * 0.8))')
 @click.option('--episodes', type=int, required=True, help='Number of episodes to run')
@@ -93,7 +94,8 @@ def mountain_car_dqn(train,
                      model_save_path,
                      model_load_path,
                      render,
-                     learning_rate,
+                     policy_learning_rate,
+                     quality_learning_rate,
                      epsilon,
                      epsilon_decay,
                      episodes,
@@ -130,7 +132,8 @@ def mountain_car_dqn(train,
     logger.info(f"  Model Save Path: {model_save_path}")
     logger.info(f"  Model Load Path: {model_load_path}")
     logger.info(f"  Render: {render}")
-    logger.info(f"  Learning Rate: {learning_rate}")
+    logger.info(f"  Policy Learning Rate: {policy_learning_rate}")
+    logger.info(f"  Quality Learning Rate: {quality_learning_rate}")
     logger.info(f"  Plots: {plot}")
     logger.info(f"  Enable Dueling: {enable_dueling}")
     logger.info(f"  Double DQN: {double_dqn}")
@@ -142,7 +145,8 @@ def mountain_car_dqn(train,
         test=test,
         episodes=episodes,
         render=render,
-        learning_rate=learning_rate,
+        policy_learning_rate=policy_learning_rate,
+        quality_learning_rate=quality_learning_rate,
         start_epsilon=epsilon,
         epsilon_decay=epsilon_decay,
         model_save_path=model_save_path,

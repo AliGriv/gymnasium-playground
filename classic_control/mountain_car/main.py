@@ -1,7 +1,7 @@
 from tqdm import tqdm
 from classic_control.mountain_car.mountainCarAgent import *
 from classic_control.mountain_car.mountainCarContAgent import *
-from classic_control.mountain_car.mountainCarDqn import *
+from classic_control.mountain_car.mountainCarDnn import *
 from matplotlib import pyplot as plt
 from pathlib import Path
 import common.utils as utils
@@ -215,7 +215,8 @@ def run_dqn(
     test: bool,
     episodes: int,
     render: bool,
-    learning_rate: float,
+    policy_learning_rate: float,
+    quality_learning_rate: float,
     start_epsilon: float,
     epsilon_decay: float,
     model_save_path: str,
@@ -235,15 +236,14 @@ def run_dqn(
 
     if train:
         logger.info(f"=== Starting training for {episodes} episodes ===")
-        agent = MountainCarDQNAgent(
+        agent = MountainCarDNNAgent(
             env=env,
-            learning_rate=learning_rate,
+            policy_learning_rate=policy_learning_rate,
+            quality_learning_rate=quality_learning_rate,
             initial_epsilon=start_epsilon,
             epsilon_decay=epsilon_decay,
-            existing_dqn_path=load_path,
-            save_dqn_path=save_path,
-            enable_dueling=enable_dqn_dueling,
-            enable_double=enable_dqn_double,
+            existing_model_path=load_path,
+            save_path=save_path,
             hidden_layer_dims=hidden_layer_dims,
             max_episode_steps=max_episode_steps
         )
@@ -261,15 +261,14 @@ def run_dqn(
             raise FileNotFoundError(f"No model file found at {load_for_test!r} to load for test run")
 
         logger.info(f"==== Starting evaluation of Mountain Car DQN for {episodes} episodes ====")
-        tester = MountainCarDQNAgent(
+        tester = MountainCarDNNAgent(
             env=env,
-            learning_rate=learning_rate,
+            policy_learning_rate=policy_learning_rate,
+            quality_learning_rate=quality_learning_rate,
             initial_epsilon=0.0,  # Epsilon is 0 in test mode
             epsilon_decay=epsilon_decay,
-            existing_dqn_path=load_for_test,
-            save_dqn_path=None,  # No need to save during testing
-            enable_dueling=enable_dqn_dueling,
-            enable_double=enable_dqn_double,
+            existing_model_path=load_for_test,
+            save_path=None,  # No need to save during testing
             hidden_layer_dims=hidden_layer_dims,
             max_episode_steps=max_episode_steps
         )
