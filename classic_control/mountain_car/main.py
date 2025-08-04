@@ -217,8 +217,6 @@ def run_dqn(
     render: bool,
     policy_learning_rate: float,
     quality_learning_rate: float,
-    start_epsilon: float,
-    epsilon_decay: float,
     model_save_path: str,
     model_load_path: str = None,
     plot: bool = True,
@@ -240,8 +238,6 @@ def run_dqn(
             env=env,
             policy_learning_rate=policy_learning_rate,
             quality_learning_rate=quality_learning_rate,
-            initial_epsilon=start_epsilon,
-            epsilon_decay=epsilon_decay,
             existing_model_path=load_path,
             save_path=save_path,
             hidden_layer_dims=hidden_layer_dims,
@@ -265,8 +261,6 @@ def run_dqn(
             env=env,
             policy_learning_rate=policy_learning_rate,
             quality_learning_rate=quality_learning_rate,
-            initial_epsilon=0.0,  # Epsilon is 0 in test mode
-            epsilon_decay=epsilon_decay,
             existing_model_path=load_for_test,
             save_path=None,  # No need to save during testing
             hidden_layer_dims=hidden_layer_dims,

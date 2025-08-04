@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from common.utils import get_moving_avgs
-
+from common.ornsteinUhlenbeck import OrnsteinUhlenbeck
 
 class MountainCarDNNAgent:
 
@@ -22,38 +22,35 @@ class MountainCarDNNAgent:
                  env: gym.Env,
                  policy_learning_rate: float,
                  quality_learning_rate: float,
-                 initial_epsilon: float,
-                 epsilon_decay: float = None,
                  existing_model_path: Path = None,
                  save_path: Path = None,
-                 update_rate: int = 50,
+                 update_rate: int = 5,
                  replay_memory_size: int = 30000,
-                 discount_factor: float = 0.9,
+                 discount_factor: float = 0.999,
                  optimizer: str = "adam",
                  log_directory: str = "logs/mountainCarDqn",
-                 batch_size: int = 32,
-                 hidden_layer_dims: List[int] = [12, 4],
+                 batch_size: int = 64,
+                 hidden_layer_dims: List[int] = [16, 16],
                  max_episode_steps: int = 500,
                  save_interval: int = 500,
-                 action_noise: float = 0.1,
-                 polyak_coefficient: float = 0.995):
+                 polyak_coefficient: float = 0.9,
+                 pure_explore_steps: int = 2000):
 
         self.env = env
 
         self.pi_lr = policy_learning_rate
         self.q_lr = quality_learning_rate
         self.discount_factor = discount_factor
-        self.action_noise = action_noise
         self.polyak =  polyak_coefficient
 
-        self.epsilon = initial_epsilon
-        self.epsilon_decay = epsilon_decay
-        self.final_epsilon = 0.0
+        self.pure_explore_steps = pure_explore_steps
 
         self.update_rate = update_rate
         self.batch_size = batch_size
         self.save_interval = save_interval
         self.max_episode_steps = max_episode_steps
+        self.ou_noise = OrnsteinUhlenbeck()
+        self.action_damping = 0.5 # TODO: Make this a parameter
 
 
         self.graph_update_rate_seconds = 20 # Update graph every 20 seconds
@@ -89,10 +86,10 @@ class MountainCarDNNAgent:
         else:
             # DQN and target network
             self.ac_net = DnnActorCritic(state_dim=self.state_dim,
-                                        action_dim=self.action_dim,
-                                        hidden_dims=hidden_layer_dims,
-                                        action_limit=self.action_limit,
-                                        device=self.device)
+                                         action_dim=self.action_dim,
+                                         hidden_dims=hidden_layer_dims,
+                                         action_limit=self.action_limit,
+                                         device=self.device)
 
             self.target_net = deepcopy(self.ac_net)
 
@@ -131,13 +128,14 @@ class MountainCarDNNAgent:
         # Bellman backup for Q function
         with torch.no_grad():
             q_pi_targ = self.target_net.q(next_states, self.target_net.pi(next_states))
+            q_pi_targ = q_pi_targ.unsqueeze(-1)
             backup = rewards + self.discount_factor * (1 - terminated) * q_pi_targ
 
         # MSE loss against Bellman backup
         loss_q = ((q_value - backup)**2).mean()
 
         # Useful info for logging
-        loss_info = dict(QVals=q_value.detach().numpy())
+        loss_info = dict(QVals=q_value.detach().cpu().numpy())
 
         return loss_q, loss_info
 
@@ -161,30 +159,32 @@ class MountainCarDNNAgent:
         else:
             raise ValueError(f"Unsupported optimizer: {optimizer}. Supported optimizers are 'adam' and 'sgd'.")
 
-    def get_action(self, state: np.ndarray) -> np.ndarray:
+    def get_action(self,
+                   state: np.ndarray,
+                   random: bool = False,
+                   induce_noise: bool = False) -> np.ndarray:
         """
-        @brief Selects an action using an epsilon-greedy policy.
+        @brief Selects an action to take in the environment based on the current state.
 
-        @param obs The current observation (state) from the environment.
+        @param state The current observation (state) from the environment.
+        @param random If True, selects a random action for exploration; otherwise, selects an action based on the policy.
+        @param induce_noise Optional noise to add to the action for exploration purposes.
         @return The action to take (np.ndarray).
         """
-        # with probability epsilon return a random action to explore the environment
-        if np.random.random() < self.epsilon:
+
+        if random:
             return self.env.action_space.sample()
-        # with probability (1 - epsilon) act greedily (exploit)
         else:
             with torch.no_grad():
                 state_t, = self._as_tensor(self._normalize_state(state))
                 a = self.ac_net.act(state_t)
-                a += self.action_noise * np.random.randn(self.action_dim)
+                if induce_noise:
+                    a = a * self.action_damping + self.ou_noise.step()
+                # logger.debug(f"  [Uncapped Action] {a}")
                 return np.clip(a, -self.action_limit, self.action_limit)
 
-    def decay_epsilon(self):
-        # TODO: Add doxygen
-        self.epsilon = max(self.final_epsilon, self.epsilon - self.epsilon_decay)
-
     def optimize(self,
-                 mini_batch: Tuple[List[Tensor], List[int], List[Tensor], List[float], List[bool]]) -> None:
+                 mini_batch: Tuple[List[Tensor], List[Tensor], List[Tensor], List[float], List[bool]]) -> None:
         """
         @brief Performs a single optimization step on the policy DQN using a mini-batch of experiences.
 
@@ -212,6 +212,18 @@ class MountainCarDNNAgent:
         rewards = torch.as_tensor([reward for reward in rewards], dtype=torch.float32, device=self.device).unsqueeze(1)
         terminations = torch.as_tensor([t for t in terminations], dtype=torch.float32, device=self.device).unsqueeze(1)
 
+        # Conditionally unsqueeze actions if it's 1D
+        if actions.dim() == 1:
+            actions = actions.unsqueeze(-1)   # now [32, 1]
+
+        # logger.debug(
+        #     f"shapes → states: {states.shape}, "
+        #     f"actions: {actions.shape}, "
+        #     f"new_states: {new_states.shape}, "
+        #     f"rewards: {rewards.shape}, "
+        #     f"terminations: {terminations.shape}"
+        # )
+
         # First run one gradient descent step for Q.
         self.q_optimizer.zero_grad()
         loss_q, loss_info = self.compute_quality_loss(states, actions, rewards, new_states, terminations)
@@ -225,7 +237,7 @@ class MountainCarDNNAgent:
 
         # Next run one gradient descent step for pi.
         self.pi_optimizer.zero_grad()
-        loss_pi = self.compute_policy_loss(states, actions, rewards, new_states, terminations)
+        loss_pi = self.compute_policy_loss(states)
         loss_pi.backward()
         self.pi_optimizer.step()
 
@@ -233,7 +245,7 @@ class MountainCarDNNAgent:
         for param in self.ac_net.q.parameters():
             param.requires_grad = True
 
-        logger.debug(f"   [Optimize] - Loss Q {loss_q.item():.4f}, Loss Pi {loss_pi.item():.4f}, Loss Info: {loss_info}")
+        logger.debug(f"   [Optimize] - Loss Q {loss_q.item():.4f}, Loss Pi {loss_pi.item():.4f}") # , Loss Info: {loss_info}
 
         # Finally, update target networks by polyak averaging.
         with torch.no_grad():
@@ -247,10 +259,9 @@ class MountainCarDNNAgent:
               num_episodes: int):
 
         logger.info(f"Beginning training for {num_episodes} episodes.")
-        if self.epsilon_decay is None:
-            self.epsilon_decay = (self.epsilon - self.final_epsilon) / (num_episodes * 0.95)
-
-        logger.info(f"Epsilon decay set to {self.epsilon_decay} per episode.")
+        if self.pure_explore_steps >= num_episodes:
+            self.pure_explore_steps = int(0.2 * num_episodes)
+            logger.warning(f"Pure exploration steps ({self.pure_explore_steps}) is greater than or equal to total episodes ({num_episodes}). Setting pure exploration steps to 20% of total episodes.")
 
         start_time = datetime.now()
         last_graph_update_time = start_time
@@ -259,11 +270,12 @@ class MountainCarDNNAgent:
             f"{num_episodes or '∞'} episodes, policy lr={self.pi_lr}, quality lr={self.q_lr} γ={self.discount_factor}")
 
         rewards_per_episode = []
-        epsilon_history = []
+
         best_reward = float("-inf")
         update_count = 0
         save_count = 0
         for episode in range(num_episodes):
+            self.ou_noise.reset()
             state, info = self.env.reset()
             update_count += 1
             next_state = state
@@ -272,9 +284,12 @@ class MountainCarDNNAgent:
             done = False
             step_count = 0
             episode_memory = ReplayMemory(self.max_episode_steps)
+
+            explore = True if episode < self.pure_explore_steps else False
+
             while not done:
                 step_count += 1
-                action = self.get_action(state)
+                action = self.get_action(state, explore, induce_noise=True)
                 next_state, reward, terminated, truncated, info = self.env.step(action)
 
                 self.memory.push(*self._as_tensor(self._normalize_state(state),
@@ -291,13 +306,13 @@ class MountainCarDNNAgent:
                 done = terminated or step_count >= self.max_episode_steps
 
             rewards_per_episode.append(episode_reward)
-            epsilon_history.append(self.epsilon)
-            logger.debug(f"  [Episode] {episode + 1}: Reward = {episode_reward}, Epsilon = {self.epsilon:.3f}, Steps = {step_count} {', Terminated' if terminated else ''}")
+
+            logger.debug(f"  [Episode] {episode + 1}: Reward = {episode_reward}, Steps = {step_count}, Explore = {explore} {', Terminated' if terminated else ''}")
             if terminated:
                 self.memory.push_success(episode_memory.states,
                                          episode_memory.actions,
                                          episode_memory.next_states,
-                                         self._propagate_success(episode_memory.rewards),
+                                         self._propagate_success(deepcopy(episode_memory.rewards)),
                                          episode_memory.terminated)
                 logger.debug(f"    [Episode] {episode + 1}: Terminated after {step_count} steps, with reward {episode_reward}")
 
@@ -307,19 +322,20 @@ class MountainCarDNNAgent:
 
                 for _ in range(self.update_rate):
                     mini_batch = self.memory.sample(self.batch_size)
-                    self.optimize(mini_batch, self.ac_net, self.target_net)
+                    self.optimize(mini_batch)
 
             # Update graph every x seconds
             current_time = datetime.now()
             if current_time - last_graph_update_time > timedelta(seconds=self.graph_update_rate_seconds):
-                self.save_graph(rewards_per_episode, epsilon_history)
+                self.save_graph(rewards_per_episode)
                 last_graph_update_time = current_time
 
             if episode_reward > best_reward:
                 best_reward = episode_reward
                 logger.info(f"New best reward: {best_reward} at episode {episode + 1}")
                 self.ac_net.save_model(self.save_path)
-            self.decay_epsilon()
+
+
             if save_count >= self.save_interval:
                 save_count = 0
                 self.ac_net.save_model(self.save_path)
@@ -330,12 +346,13 @@ class MountainCarDNNAgent:
         logger.info(f"Training complete. Model saved to {self.save_path}")
 
 
-    def _propagate_success(self, rewards, ratio: float = 0.97):
-        propagated_value = rewards[-1]
-        for i in range(len(rewards) - 1, 0, -1):
-            rewards[i] = max(rewards[i], propagated_value)
-            propagated_value = propagated_value*ratio
-
+    def _propagate_success(self, rewards, ratio=0.97):
+        propagated = rewards[-1]
+        # go from last index −1 down to 0 inclusive
+        for i in range(len(rewards)-1, -1, -1):
+            # take whatever is larger: your original reward or the decayed later reward
+            rewards[i] = max(rewards[i], propagated)
+            propagated *= ratio
         return rewards
 
 
@@ -346,18 +363,18 @@ class MountainCarDNNAgent:
         return tuple(torch.as_tensor(arg, dtype=torch.float32, device=self.device) for arg in args)
 
 
-    def save_graph(self, rewards_per_episode: List[float], epsilon_history: List[float]) -> None:
+    def save_graph(self, rewards_per_episode: List[float]) -> None:
         """
         @brief Saves a plot showing the training progress over episodes.
 
         This function generates and saves two side-by-side line plots:
         - The moving average of rewards per episode (window size 100).
-        - The epsilon value (exploration rate) over time.
+
 
         Both plots are saved as a single image file to `self.graph_file`.
 
         @param rewards_per_episode List of total rewards obtained in each episode.
-        @param epsilon_history List of epsilon values over training steps or episodes.
+
         """
         # Save plots
         fig = plt.figure(1)
@@ -365,16 +382,9 @@ class MountainCarDNNAgent:
         # Plot average rewards (Y-axis) vs episodes (X-axis)
         mean_rewards = get_moving_avgs(rewards_per_episode, 100, "same")
 
-        plt.subplot(121) # plot on a 1 row x 2 col grid, at cell 1
         # plt.xlabel('Episodes')
         plt.ylabel('Mean Rewards')
         plt.plot(mean_rewards)
-
-        # Plot epsilon decay (Y-axis) vs episodes (X-axis)
-        plt.subplot(122) # plot on a 1 row x 2 col grid, at cell 2
-        # plt.xlabel('Time Steps')
-        plt.ylabel('Epsilon Decay')
-        plt.plot(epsilon_history)
 
         plt.subplots_adjust(wspace=1.0, hspace=1.0)
 
@@ -386,12 +396,10 @@ class MountainCarDNNAgent:
         logger.info(f"Beginning evaluation: {num_episodes} episodes")
         self.ac_net.eval()
         logger.debug(f"Evaluation mode enabled.")
-        if not self.action_noise == 0.0:
-            self.action_noise = 0.0
-        self.epsilon = 0.0
         rewards_per_episode = []
         terminated_per_episode = []
         for episode in tqdm(range(num_episodes), desc="Episodes", leave=False):
+            self.ou_noise.reset()
             state, _ = self.env.reset()
             done = False
             episode_reward = 0.0
@@ -399,7 +407,8 @@ class MountainCarDNNAgent:
             terminated = False
             while not done:
                 step_count += 1
-                action = self.get_action(state)
+                action = self.get_action(state, random=False, induce_noise=False)
+                logger.debug(f"  [Episode {episode + 1}] Step {step_count}: Action = {action}, State = {state}")
                 next_state, reward, terminated, truncated, info = self.env.step(action)
                 episode_reward += reward
 
@@ -417,13 +426,17 @@ class MountainCarDNNAgent:
 
 
     def _normalize_state(self, state: np.ndarray) -> np.ndarray:
-
-        _min = self.env.observation_space.low
-        _max = self.env.observation_space.high
-
-        return (state - _min) / (_max - _min)
+        """
+        Mapping the values to the range [-1, 1]
+        """
+        low, high = self.env.observation_space.low, self.env.observation_space.high
+        norm01 = (state - low) / (high - low)  # [0..1]
+        return norm01 * 2.0 - 1.0               # now in [-1..+1]
 
     def _normalize_reward(self, reward: float) -> float:
+        """
+        Mapping the rewards to the range [0, 1]
+        """
         _min = -0.1*self.max_episode_steps
         _max = 100.0
         return (reward - _min) / (_max - _min)

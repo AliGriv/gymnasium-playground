@@ -77,15 +77,13 @@ def mountain_car(train, test, model_save_path, model_load_path, render, learning
 @click.option('--model-save-path', default='models/classic_control/mountain_car_dqn.pt', help='Where to save the pickel model (used in training)')
 @click.option('--model-load-path', help='Path to pickel load model from, in test-only mode it is required')
 @click.option('--render', is_flag=True, help='Render the environment')
-@click.option('--policy-learning-rate', default=0.9, type=float, help='Policy earning rate')
-@click.option('--quality-learning-rate', default=0.9, type=float, help='Policy earning rate')
-@click.option('--epsilon', type=float, default=1.0, help='Starting epsilon (will be 0 in test mode)')
-@click.option('--epsilon-decay', type=float, help='Epsilon decay rate (default: epsilon / (episodes * 0.8))')
+@click.option('--policy-learning-rate', default=0.001, type=float, help='Policy earning rate')
+@click.option('--quality-learning-rate', default=0.05, type=float, help='Policy earning rate')
 @click.option('--episodes', type=int, required=True, help='Number of episodes to run')
 @click.option('--plot', is_flag=True, help='Plot some statistics from training procedure')
 @click.option('--enable-dueling', is_flag=True, help='Enable Dueling Architecture for DQN training.')
 @click.option('--double-dqn', is_flag=True, help='Use double networking architecture for training.')
-@click.option('--hidden-layers', multiple=True, type=int, default=(4,5,4),
+@click.option('--hidden-layers', multiple=True, type=int, default=(16,16),
               help="List of integers for number of nodes in each hidden layer.")
 @click.option('--max-episode-steps', type=int, default=500,
               help='Maximum number of steps per episode (default: 500).')
@@ -96,8 +94,6 @@ def mountain_car_dqn(train,
                      render,
                      policy_learning_rate,
                      quality_learning_rate,
-                     epsilon,
-                     epsilon_decay,
                      episodes,
                      plot,
                      enable_dueling,
@@ -111,10 +107,7 @@ def mountain_car_dqn(train,
     if test and not train:
         if not model_load_path:
             raise click.UsageError("--model-load-path is required when using --test.")
-        epsilon = 0.0
 
-    if epsilon_decay is None:
-        epsilon_decay = epsilon / (episodes * 0.8) # TODO: Avoid magic numbers
 
     if plot and not train:
         plot = False
@@ -127,8 +120,6 @@ def mountain_car_dqn(train,
     logger.info("Running Taxi experiment with:")
     logger.info(f"  Mode: {'train' if train else ''} {'test' if test else ''}")
     logger.info(f"  Episodes: {episodes}")
-    logger.info(f"  Epsilon: {epsilon}")
-    logger.info(f"  Epsilon Decay: {epsilon_decay}")
     logger.info(f"  Model Save Path: {model_save_path}")
     logger.info(f"  Model Load Path: {model_load_path}")
     logger.info(f"  Render: {render}")
@@ -147,8 +138,6 @@ def mountain_car_dqn(train,
         render=render,
         policy_learning_rate=policy_learning_rate,
         quality_learning_rate=quality_learning_rate,
-        start_epsilon=epsilon,
-        epsilon_decay=epsilon_decay,
         model_save_path=model_save_path,
         model_load_path=model_load_path,
         plot=plot,

@@ -11,6 +11,23 @@ from datetime import datetime
 Disclaimer: Heavily inspired by https://github.com/openai/spinningup/blob/master/spinup/algos/pytorch/ddpg/core.py
 """
 
+
+def ddpg_layer_init(layer: nn.Module, final_w: float = 3e-3):
+    if isinstance(layer, nn.Linear):
+        # Xavier / Glorot uniform for hidden layers
+        init.xavier_uniform_(layer.weight, gain=init.calculate_gain('relu'))
+        # zero bias
+        init.zeros_(layer.bias)
+
+        # If this is the *last* layer in a module, shrink its weights to tiny values
+        # so the actor starts near zero and the critic’s Q-values don’t explode.
+        if layer.out_features == layer.weight.size(0) == getattr(layer, 'out_features', None) \
+           and layer.weight.size(1) != layer.weight.size(0):
+            # not a perfect check, but you can also pass a flag into your Dnn to say "this is final"
+            layer.weight.data.uniform_(-final_w, final_w)
+            layer.bias.data.uniform_(-final_w, final_w)
+
+
 class Dnn(nn.Module):
     def __init__(self,
                  sizes: Sequence[int],
@@ -41,6 +58,7 @@ class Dnn(nn.Module):
             layers += [nn.Linear(sizes[j], sizes[j+1]), act()]
 
         self.network = nn.Sequential(*layers)
+        self.network.apply(lambda m: ddpg_layer_init(m, final_w=3e-3))
         self.to(self.device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -73,6 +91,7 @@ class DnnActor(nn.Module):
         self.pi = Dnn(
             sizes = [state_dim] + list(hidden_dims) + [action_dim],
             activation = activation,
+            output_activation = nn.Tanh,
             device = device
         )
 
@@ -100,6 +119,7 @@ class DnnQFunction(nn.Module):
         super().__init__()
 
         # Q-function (Quality) Network which maps state, action to a Q-value
+        # final output layer meant to generate action values (Q values)
         self.q = Dnn(
             sizes = [state_dim + action_dim] + list(hidden_dims) + [1],
             activation = activation,
