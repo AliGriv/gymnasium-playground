@@ -11,21 +11,32 @@ from datetime import datetime
 Disclaimer: Heavily inspired by https://github.com/openai/spinningup/blob/master/spinup/algos/pytorch/ddpg/core.py
 """
 
+def init_linear(m: nn.Linear, *, final: bool = False):
+    """
+    The idea is coming from https://arxiv.org/abs/1509.02971 by Lillicrap, et al
 
-def ddpg_layer_init(layer: nn.Module, final_w: float = 3e-3):
-    if isinstance(layer, nn.Linear):
-        # Xavier / Glorot uniform for hidden layers
-        init.xavier_uniform_(layer.weight, gain=init.calculate_gain('relu'))
-        # zero bias
-        init.zeros_(layer.bias)
 
-        # If this is the *last* layer in a module, shrink its weights to tiny values
-        # so the actor starts near zero and the critic’s Q-values don’t explode.
-        if layer.out_features == layer.weight.size(0) == getattr(layer, 'out_features', None) \
-           and layer.weight.size(1) != layer.weight.size(0):
-            # not a perfect check, but you can also pass a flag into your Dnn to say "this is final"
-            layer.weight.data.uniform_(-final_w, final_w)
-            layer.bias.data.uniform_(-final_w, final_w)
+    For the actor, we want initial actions ≈ 0 so the agent starts “in control”
+    (small, safe moves) and exploration noise can do the searching.
+
+    For the critic, small Q-value outputs prevent early overestimation, which
+    can derail learning before the target networks stabilize.
+
+
+    And as for the Xavier initialization: keeps the signal flowing forward and backward without blowing up or dying out.
+    Xavier initialization picks weights so that:
+
+    The variance of outputs is about the same as the variance of inputs.
+
+    The variance of backpropagated gradients is preserved.
+    """
+    if final:
+        # Tiny uniform for output layers (DDPG-style)
+        init.uniform_(m.weight, -3e-3, 3e-3)
+        init.uniform_(m.bias,   -3e-3, 3e-3)
+    else:
+        init.xavier_uniform_(m.weight, gain=init.calculate_gain('relu'))
+        init.zeros_(m.bias)
 
 
 class Dnn(nn.Module):
@@ -53,12 +64,16 @@ class Dnn(nn.Module):
         self.device = device if device else available_device
 
         layers = []
-        for j in range(len(sizes)-1):
-            act = activation if j < len(sizes)-2 else output_activation
-            layers += [nn.Linear(sizes[j], sizes[j+1]), act()]
+        for i in range(len(sizes)-2):
+            lin = nn.Linear(sizes[i], sizes[i+1])
+            init_linear(lin, final=False)
+            layers += [lin, activation()]
 
+        # final layer
+        lin_out = nn.Linear(sizes[-2], sizes[-1])
+        init_linear(lin_out, final=True)
+        layers += [lin_out, output_activation()]
         self.network = nn.Sequential(*layers)
-        self.network.apply(lambda m: ddpg_layer_init(m, final_w=3e-3))
         self.to(self.device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
