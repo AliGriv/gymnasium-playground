@@ -75,7 +75,7 @@ def mountain_car(train, test, model_save_path, model_load_path, render, learning
 @click.option('--train', is_flag=True, help='Run training mode')
 @click.option('--test', is_flag=True, help='Run test mode')
 @click.option('--model-save-path', default='models/classic_control/mountain_car_ddpg.pt', help='Where to save the model (used in training)')
-@click.option('--model-load-path', help='Path to pickel load model from, in test-only mode it is required')
+@click.option('--model-load-path', help='Path to load model from, in test-only mode it is required')
 @click.option('--render', is_flag=True, help='Render the environment')
 @click.option('--policy-learning-rate', default=0.001, type=float, help='Policy earning rate')
 @click.option('--quality-learning-rate', default=0.005, type=float, help='Policy earning rate')

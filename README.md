@@ -114,3 +114,72 @@ Options:
   --max-episode-steps INTEGER  Maximum number of steps per episode
   --help                       Show this message and exit.
   ```
+
+## Classic Control
+### Mountain Car
+
+1. For basic discrete actions model use `gym-playground classic-control mountain-car` with following options:
+```
+Usage: gym-playground classic-control mountain-car [OPTIONS]
+
+  Run the Taxi experiment
+
+Options:
+  --train                 Run training mode
+  --test                  Run test mode
+  --model-save-path TEXT  Where to save the pickel model (used in training)
+  --model-load-path TEXT  Path to pickel load model from, in test-only mode it
+                          is required
+  --render                Render the environment
+  --learning-rate FLOAT   Learning rate
+  --epsilon FLOAT         Starting epsilon (will be 0 in test mode)
+  --epsilon-decay FLOAT   Epsilon decay rate (default: epsilon / (episodes *
+                          0.8))
+  --episodes INTEGER      Number of episodes to run  [required]
+  --plot                  Plot some statistics from training procedure
+  --cont-actions          Use continuous actions model (defaultuses discrete
+                          actions space).
+  --help                  Show this message and exit.
+```
+
+2. For basic continuous actions, pass the following flag `--cont-actions` to the previous command
+
+3. For Neural Network based solution for continuous actions which implements deep deterministic policy gradient (DDPG) method:
+
+```
+Usage: gym-playground classic-control mountain-car-ddpg [OPTIONS]
+
+Options:
+  --train                        Run training mode
+  --test                         Run test mode
+  --model-save-path TEXT         Where to save the model (used in training)
+  --model-load-path TEXT         Path to load model from, in test-only
+                                 mode it is required
+  --render                       Render the environment
+  --policy-learning-rate FLOAT   Policy earning rate
+  --quality-learning-rate FLOAT  Policy earning rate
+  --episodes INTEGER             Number of episodes to run  [required]
+  --plot                         Plot some statistics from training procedure
+  --hidden-layers INTEGER        List of integers for number of nodes in each
+                                 hidden layer.
+  --max-episode-steps INTEGER    Maximum number of steps per episode (default:
+                                 500).
+  --help                         Show this message and exit.
+```
+
+  - **Note**: It takes trial and error and a long time to train this model. The default values are the last successful training values. With a network of `16 x 16` hidden layers fully connected. Over 10000 episodes. Here is the metadata:
+
+  ```json
+  {
+      "state_dim": 2,
+      "action_dim": 1,
+      "action_limit": 1.0,
+      "hidden_dims": [
+          16,
+          16
+      ],
+      "activation": "ReLU",
+      "device": "cuda",
+      "timestamp": "2025-08-09T14:20:20.538142"
+  }
+  ```
