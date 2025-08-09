@@ -183,3 +183,41 @@ Options:
       "timestamp": "2025-08-09T14:20:20.538142"
   }
   ```
+
+## Analysis
+### Ornstein-Uhlenbeck Noise
+
+```
+Usage: gym-playground analysis ou-noise [OPTIONS]
+
+Options:
+  --mu FLOAT           Long-term mean (drift target).  [default: 0.0]
+  --theta FLOAT        Rate of mean reversion.  [default: 0.05]
+  --sigma FLOAT        Noise scale.  [default: 0.3]
+  --dt FLOAT           Time step size.  [default: 0.4]
+  --x0 FLOAT           Initial value of the process (None defaults to mu).
+  --min-sigma FLOAT    Minimum value to which sigma can decay.  [default:
+                       0.01]
+  --sigma-decay FLOAT  Multiplicative factor for sigma decay per step.
+                       [default: 0.9995]
+  --steps INTEGER      Number of steps to simulate.  [default: 5000]
+  --help               Show this message and exit.
+```
+
+![OU_Analysis](./images/ou_analysis.png)
+
+### Mountain Car Continuous DDPG
+
+```
+Usage: gym-playground analysis mountain-car-ddpg [OPTIONS]
+
+  Analyze the DDPG model for Mountain Car Continuous environment.
+
+  :param model: Path to the trained DDPG model file.
+
+Options:
+  --model TEXT  Path to the trained DDPG model.  [required]
+  --help        Show this message and exit.
+```
+
+![Mountain-Car-DDPG-Analysis](./images/mountain_car_ddpg_analysis.png)

@@ -1,6 +1,7 @@
 import click
 from toy_text.cli import cli as toy_text_cli
 from classic_control.cli import cli as control_classic_cli
+from analysis.cli import cli as analysis_cli
 
 @click.group()
 def cli():
@@ -9,3 +10,4 @@ def cli():
 
 cli.add_command(toy_text_cli, name="toy-text")
 cli.add_command(control_classic_cli, name="classic-control")
+cli.add_command(analysis_cli, name="analysis")
