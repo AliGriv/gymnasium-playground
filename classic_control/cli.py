@@ -1,6 +1,7 @@
 import click
 from common.loggerConfig import logger
 from classic_control.mountain_car.main import run as run_mountain_car
+from classic_control.mountain_car.main import run_ddpg as run_mountain_car_ddpg
 
 @click.group()
 def cli():
@@ -32,7 +33,7 @@ def mountain_car(train, test, model_save_path, model_load_path, render, learning
         epsilon = 0.0
 
     if epsilon_decay is None:
-        epsilon_decay = epsilon / (episodes * 0.8)
+        epsilon_decay = epsilon / (episodes * 0.8) # TODO: Avoid magic numbers
 
     if plot and not train:
         plot = False
@@ -68,4 +69,72 @@ def mountain_car(train, test, model_save_path, model_load_path, render, learning
         model_load_path=model_load_path,
         plot=plot,
         cont_actions=cont_actions
+    )
+
+@cli.command()
+@click.option('--train', is_flag=True, help='Run training mode')
+@click.option('--test', is_flag=True, help='Run test mode')
+@click.option('--model-save-path', default='models/classic_control/mountain_car_ddpg.pt', help='Where to save the model (used in training)')
+@click.option('--model-load-path', help='Path to load model from, in test-only mode it is required')
+@click.option('--render', is_flag=True, help='Render the environment')
+@click.option('--policy-learning-rate', default=0.001, type=float, help='Policy earning rate')
+@click.option('--quality-learning-rate', default=0.005, type=float, help='Policy earning rate')
+@click.option('--episodes', type=int, required=True, help='Number of episodes to run')
+@click.option('--plot', is_flag=True, help='Plot some statistics from training procedure')
+@click.option('--hidden-layers', multiple=True, type=int, default=(16,16),
+              help="List of integers for number of nodes in each hidden layer.")
+@click.option('--max-episode-steps', type=int, default=999,
+              help='Maximum number of steps per episode (default: 500).')
+def mountain_car_ddpg(train,
+                      test,
+                      model_save_path,
+                      model_load_path,
+                      render,
+                      policy_learning_rate,
+                      quality_learning_rate,
+                      episodes,
+                      plot,
+                      hidden_layers,
+                      max_episode_steps):
+
+    if not train and not test:
+        raise click.UsageError("Specify either --train or --train to proceed.")
+
+    if test and not train:
+        if not model_load_path:
+            raise click.UsageError("--model-load-path is required when using --test.")
+
+
+    if plot and not train:
+        plot = False
+
+    if not train and model_save_path:
+        model_save_path = None
+    elif train and not model_save_path.endswith('.pt'):
+        model_save_path += '.pt'
+
+    logger.info("Running Taxi experiment with:")
+    logger.info(f"  Mode: {'train' if train else ''} {'test' if test else ''}")
+    logger.info(f"  Episodes: {episodes}")
+    logger.info(f"  Model Save Path: {model_save_path}")
+    logger.info(f"  Model Load Path: {model_load_path}")
+    logger.info(f"  Render: {render}")
+    logger.info(f"  Policy Learning Rate: {policy_learning_rate}")
+    logger.info(f"  Quality Learning Rate: {quality_learning_rate}")
+    logger.info(f"  Plots: {plot}")
+    logger.info(f"  Hidden Layers: {hidden_layers}")
+    logger.info(f"  Max Episode Steps: {max_episode_steps}")
+
+    run_mountain_car_ddpg(
+        train=train,
+        test=test,
+        episodes=episodes,
+        render=render,
+        policy_learning_rate=policy_learning_rate,
+        quality_learning_rate=quality_learning_rate,
+        model_save_path=model_save_path,
+        model_load_path=model_load_path,
+        plot=plot,
+        hidden_layer_dims=list(hidden_layers),
+        max_episode_steps=max_episode_steps
     )
