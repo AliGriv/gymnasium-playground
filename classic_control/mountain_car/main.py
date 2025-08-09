@@ -223,7 +223,7 @@ def run_dqn(
     enable_dqn_dueling: bool = False,
     enable_dqn_double: bool = False,
     hidden_layer_dims: List = [12, 4],
-    max_episode_steps: int = 500
+    max_episode_steps: int = 999
 ):
 
     save_path = Path(model_save_path) if model_save_path else None

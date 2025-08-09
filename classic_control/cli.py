@@ -78,14 +78,14 @@ def mountain_car(train, test, model_save_path, model_load_path, render, learning
 @click.option('--model-load-path', help='Path to pickel load model from, in test-only mode it is required')
 @click.option('--render', is_flag=True, help='Render the environment')
 @click.option('--policy-learning-rate', default=0.001, type=float, help='Policy earning rate')
-@click.option('--quality-learning-rate', default=0.05, type=float, help='Policy earning rate')
+@click.option('--quality-learning-rate', default=0.005, type=float, help='Policy earning rate')
 @click.option('--episodes', type=int, required=True, help='Number of episodes to run')
 @click.option('--plot', is_flag=True, help='Plot some statistics from training procedure')
 @click.option('--enable-dueling', is_flag=True, help='Enable Dueling Architecture for DQN training.')
 @click.option('--double-dqn', is_flag=True, help='Use double networking architecture for training.')
 @click.option('--hidden-layers', multiple=True, type=int, default=(16,16),
               help="List of integers for number of nodes in each hidden layer.")
-@click.option('--max-episode-steps', type=int, default=500,
+@click.option('--max-episode-steps', type=int, default=999,
               help='Maximum number of steps per episode (default: 500).')
 def mountain_car_dqn(train,
                      test,

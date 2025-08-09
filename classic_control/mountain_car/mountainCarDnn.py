@@ -15,6 +15,13 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from common.utils import get_moving_avgs
 from common.ornsteinUhlenbeck import OrnsteinUhlenbeck
+import torch.nn.functional as F
+from torch.nn.utils import clip_grad_norm_
+from itertools import islice
+
+def deque_slice(dq, start):
+    # returns a list slice from start to end
+    return list(islice(dq, start, None))
 
 class MountainCarDNNAgent:
 
@@ -24,17 +31,17 @@ class MountainCarDNNAgent:
                  quality_learning_rate: float,
                  existing_model_path: Path = None,
                  save_path: Path = None,
-                 update_rate: int = 5,
+                 update_rate: int = 2,
                  replay_memory_size: int = 30000,
-                 discount_factor: float = 0.999,
+                 discount_factor: float = 0.99,
                  optimizer: str = "adam",
                  log_directory: str = "logs/mountainCarDqn",
                  batch_size: int = 64,
                  hidden_layer_dims: List[int] = [16, 16],
                  max_episode_steps: int = 500,
-                 save_interval: int = 500,
-                 polyak_coefficient: float = 0.9,
-                 pure_explore_steps: int = 2000):
+                 save_interval: int = 200,
+                 polyak_coefficient: float = 0.995,
+                 pure_explore_steps: int = 50):
 
         self.env = env
 
@@ -50,7 +57,7 @@ class MountainCarDNNAgent:
         self.save_interval = save_interval
         self.max_episode_steps = max_episode_steps
         self.ou_noise = OrnsteinUhlenbeck()
-        self.action_damping = 0.5 # TODO: Make this a parameter
+        self.action_damping = 1.0 # TODO: Make this a parameter
 
 
         self.graph_update_rate_seconds = 20 # Update graph every 20 seconds
@@ -103,8 +110,6 @@ class MountainCarDNNAgent:
         # Optimizer for policy and Q function
         self.pi_optimizer = self.get_optimizer(optimizer, self.ac_net.pi.parameters(), lr=self.pi_lr)
         self.q_optimizer = self.get_optimizer(optimizer, self.ac_net.q.parameters(), lr=self.q_lr)
-        # Loss Function
-        self.loss_fn = torch.nn.MSELoss()
 
         # Replay memory
         self.memory = ReplayMemory(replay_memory_size)
@@ -127,12 +132,14 @@ class MountainCarDNNAgent:
 
         # Bellman backup for Q function
         with torch.no_grad():
-            q_pi_targ = self.target_net.q(next_states, self.target_net.pi(next_states))
-            q_pi_targ = q_pi_targ.unsqueeze(-1)
-            backup = rewards + self.discount_factor * (1 - terminated) * q_pi_targ
+            q_pi_targ = self.target_net.q(next_states, self.target_net.pi(next_states))  # [B]
+            rewards_1d      = rewards.view(-1)         # or rewards.squeeze(-1)
+            terminated_1d   = terminated.view(-1)      # or terminated.squeeze(-1)
+            backup = rewards_1d + self.discount_factor * (1 - terminated_1d) * q_pi_targ  # [B]
+
 
         # MSE loss against Bellman backup
-        loss_q = ((q_value - backup)**2).mean()
+        loss_q = F.mse_loss(q_value, backup)
 
         # Useful info for logging
         loss_info = dict(QVals=q_value.detach().cpu().numpy())
@@ -228,6 +235,7 @@ class MountainCarDNNAgent:
         self.q_optimizer.zero_grad()
         loss_q, loss_info = self.compute_quality_loss(states, actions, rewards, new_states, terminations)
         loss_q.backward()
+        clip_grad_norm_(self.ac_net.q.parameters(), max_norm=1.0)
         self.q_optimizer.step()
 
         # Freeze Q-network so you don't waste computational effort
@@ -239,6 +247,7 @@ class MountainCarDNNAgent:
         self.pi_optimizer.zero_grad()
         loss_pi = self.compute_policy_loss(states)
         loss_pi.backward()
+        clip_grad_norm_(self.ac_net.pi.parameters(), max_norm=0.9)
         self.pi_optimizer.step()
 
         # Unfreeze Q-network so you can optimize it at next DDPG step.
@@ -295,11 +304,11 @@ class MountainCarDNNAgent:
                 self.memory.push(*self._as_tensor(self._normalize_state(state),
                                                   action,
                                                   self._normalize_state(next_state),
-                                                  self._normalize_reward(reward),
+                                                  reward,
                                                   terminated))
                 episode_memory.push(*self._as_tensor(self._normalize_state(state),
                                                      action, self._normalize_state(next_state),
-                                                     self._normalize_reward(reward), terminated))
+                                                     reward, terminated))
 
                 episode_reward += reward
                 state = next_state
@@ -309,16 +318,24 @@ class MountainCarDNNAgent:
 
             logger.debug(f"  [Episode] {episode + 1}: Reward = {episode_reward}, Steps = {step_count}, Explore = {explore} {', Terminated' if terminated else ''}")
             if terminated:
-                self.memory.push_success(episode_memory.states,
-                                         episode_memory.actions,
-                                         episode_memory.next_states,
-                                         self._propagate_success(deepcopy(episode_memory.rewards)),
-                                         episode_memory.terminated)
+                # Only push the last 20% of the episode, or all if less than 200 steps
+                n = len(episode_memory)
+                if n < 200:
+                    idx_start = 0
+                else:
+                    idx_start = int(n * 0.8)
+                self.memory.push_success(
+                    deque_slice(episode_memory.states, idx_start),
+                    deque_slice(episode_memory.actions, idx_start),
+                    deque_slice(episode_memory.next_states, idx_start),
+                    deepcopy(deque_slice(episode_memory.rewards, idx_start)),
+                    deque_slice(episode_memory.terminated, idx_start)
+                )
                 logger.debug(f"    [Episode] {episode + 1}: Terminated after {step_count} steps, with reward {episode_reward}")
 
             episode_memory.clear()
 
-            if len(self.memory) > self.batch_size and update_count % self.update_rate == 0:
+            if len(self.memory) > self.batch_size and update_count > self.pure_explore_steps:
 
                 for _ in range(self.update_rate):
                     mini_batch = self.memory.sample(self.batch_size)
@@ -340,20 +357,11 @@ class MountainCarDNNAgent:
                 save_count = 0
                 self.ac_net.save_model(self.save_path)
             save_count += 1
+            self.ou_noise.decay_sigma()
 
 
         self.ac_net.save_model(self.save_path)
         logger.info(f"Training complete. Model saved to {self.save_path}")
-
-
-    def _propagate_success(self, rewards, ratio=0.97):
-        propagated = rewards[-1]
-        # go from last index −1 down to 0 inclusive
-        for i in range(len(rewards)-1, -1, -1):
-            # take whatever is larger: your original reward or the decayed later reward
-            rewards[i] = max(rewards[i], propagated)
-            propagated *= ratio
-        return rewards
 
 
     def _as_tensor(self, *args) -> Tuple[Tensor, ...]:
@@ -408,7 +416,7 @@ class MountainCarDNNAgent:
             while not done:
                 step_count += 1
                 action = self.get_action(state, random=False, induce_noise=False)
-                logger.debug(f"  [Episode {episode + 1}] Step {step_count}: Action = {action}, State = {state}")
+                logger.debug(f"  [Episode {episode + 1}] Step {step_count}: Action = {action}, State = {state}, Normalized State = {self._normalize_state(state)}")
                 next_state, reward, terminated, truncated, info = self.env.step(action)
                 episode_reward += reward
 
@@ -432,11 +440,3 @@ class MountainCarDNNAgent:
         low, high = self.env.observation_space.low, self.env.observation_space.high
         norm01 = (state - low) / (high - low)  # [0..1]
         return norm01 * 2.0 - 1.0               # now in [-1..+1]
-
-    def _normalize_reward(self, reward: float) -> float:
-        """
-        Mapping the rewards to the range [0, 1]
-        """
-        _min = -0.1*self.max_episode_steps
-        _max = 100.0
-        return (reward - _min) / (_max - _min)
