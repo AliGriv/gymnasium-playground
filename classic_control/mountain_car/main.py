@@ -1,7 +1,7 @@
 from tqdm import tqdm
 from classic_control.mountain_car.mountainCarAgent import *
 from classic_control.mountain_car.mountainCarContAgent import *
-from classic_control.mountain_car.mountainCarDnn import *
+from classic_control.mountain_car.mountainCarDdpg import *
 from matplotlib import pyplot as plt
 from pathlib import Path
 import common.utils as utils
