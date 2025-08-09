@@ -111,7 +111,7 @@ class ReplayMemory:
             states = [self.success_states[i] for i in suc_ind] + [self.states[i] for i in reg_ind]
             actions = [self.success_actions[i] for i in suc_ind] + [self.actions[i] for i in reg_ind]
             next_states = [self.success_next_states[i] for i in suc_ind] + [self.next_states[i] for i in reg_ind]
-            rewards = [2.0*self.success_rewards[i] for i in suc_ind] + [self.rewards[i] for i in reg_ind]
+            rewards = [self.success_rewards[i] for i in suc_ind] + [self.rewards[i] for i in reg_ind]
             terminated_flags = [self.success_terminated[i] for i in suc_ind] + [self.terminated[i] for i in reg_ind]
 
             return states, actions, next_states, rewards, terminated_flags
