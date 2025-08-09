@@ -210,7 +210,7 @@ def run(
             logger.exception("Failed to generate the plots.")
 
 
-def run_dqn(
+def run_ddpg(
     train: bool,
     test: bool,
     episodes: int,
@@ -220,8 +220,6 @@ def run_dqn(
     model_save_path: str,
     model_load_path: str = None,
     plot: bool = True,
-    enable_dqn_dueling: bool = False,
-    enable_dqn_double: bool = False,
     hidden_layer_dims: List = [12, 4],
     max_episode_steps: int = 999
 ):

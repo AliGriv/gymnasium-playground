@@ -1,7 +1,7 @@
 import click
 from common.loggerConfig import logger
 from classic_control.mountain_car.main import run as run_mountain_car
-from classic_control.mountain_car.main import run_dqn as run_mountain_car_dqn
+from classic_control.mountain_car.main import run_ddpg as run_mountain_car_ddpg
 
 @click.group()
 def cli():
@@ -74,32 +74,28 @@ def mountain_car(train, test, model_save_path, model_load_path, render, learning
 @cli.command()
 @click.option('--train', is_flag=True, help='Run training mode')
 @click.option('--test', is_flag=True, help='Run test mode')
-@click.option('--model-save-path', default='models/classic_control/mountain_car_dqn.pt', help='Where to save the pickel model (used in training)')
+@click.option('--model-save-path', default='models/classic_control/mountain_car_ddpg.pt', help='Where to save the model (used in training)')
 @click.option('--model-load-path', help='Path to pickel load model from, in test-only mode it is required')
 @click.option('--render', is_flag=True, help='Render the environment')
 @click.option('--policy-learning-rate', default=0.001, type=float, help='Policy earning rate')
 @click.option('--quality-learning-rate', default=0.005, type=float, help='Policy earning rate')
 @click.option('--episodes', type=int, required=True, help='Number of episodes to run')
 @click.option('--plot', is_flag=True, help='Plot some statistics from training procedure')
-@click.option('--enable-dueling', is_flag=True, help='Enable Dueling Architecture for DQN training.')
-@click.option('--double-dqn', is_flag=True, help='Use double networking architecture for training.')
 @click.option('--hidden-layers', multiple=True, type=int, default=(16,16),
               help="List of integers for number of nodes in each hidden layer.")
 @click.option('--max-episode-steps', type=int, default=999,
               help='Maximum number of steps per episode (default: 500).')
-def mountain_car_dqn(train,
-                     test,
-                     model_save_path,
-                     model_load_path,
-                     render,
-                     policy_learning_rate,
-                     quality_learning_rate,
-                     episodes,
-                     plot,
-                     enable_dueling,
-                     double_dqn,
-                     hidden_layers,
-                     max_episode_steps):
+def mountain_car_ddpg(train,
+                      test,
+                      model_save_path,
+                      model_load_path,
+                      render,
+                      policy_learning_rate,
+                      quality_learning_rate,
+                      episodes,
+                      plot,
+                      hidden_layers,
+                      max_episode_steps):
 
     if not train and not test:
         raise click.UsageError("Specify either --train or --train to proceed.")
@@ -126,12 +122,10 @@ def mountain_car_dqn(train,
     logger.info(f"  Policy Learning Rate: {policy_learning_rate}")
     logger.info(f"  Quality Learning Rate: {quality_learning_rate}")
     logger.info(f"  Plots: {plot}")
-    logger.info(f"  Enable Dueling: {enable_dueling}")
-    logger.info(f"  Double DQN: {double_dqn}")
     logger.info(f"  Hidden Layers: {hidden_layers}")
     logger.info(f"  Max Episode Steps: {max_episode_steps}")
 
-    run_mountain_car_dqn(
+    run_mountain_car_ddpg(
         train=train,
         test=test,
         episodes=episodes,
@@ -141,8 +135,6 @@ def mountain_car_dqn(train,
         model_save_path=model_save_path,
         model_load_path=model_load_path,
         plot=plot,
-        enable_dqn_dueling=enable_dueling,
-        enable_dqn_double=double_dqn,
         hidden_layer_dims=list(hidden_layers),
         max_episode_steps=max_episode_steps
     )
