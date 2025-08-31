@@ -20,8 +20,9 @@ def run(
     model_save_path: str,
     model_load_path: str = None,
     plot: bool = True,
-    cont_actions: bool = False
-):
+    cont_actions: bool = False,
+    maximum_episode_steps: int = 1000
+    ):
     """
     @brief Entry point for training and testing a Q-learning agent on the MountainCar-v0 environment.
 
@@ -39,6 +40,7 @@ def run(
     @param model_load_path Optional path to load a pre-trained Q-table.
     @param plot Whether to plot training statistics (rewards and errors).
     @param cont_actions Flag to indicate if continuous actions should be used (default uses discrete actions space).
+    @param maximum_episode_steps Maximum number of steps per episode (default: 1000).
     """
 
 
@@ -123,7 +125,7 @@ def run(
                 # update if the environment is done and the current obs
                 obs = next_obs
                 rewards += reward
-                done = terminated or rewards <= reward_stop_treshold or step >= 1000 #TODO: Avoid magic numbers
+                done = terminated or rewards <= reward_stop_treshold or step >= maximum_episode_steps
 
             if terminated and cont_actions:
                 agent.rewind_episode(episode_history)
@@ -222,7 +224,48 @@ def run_ddpg(
     plot: bool = True,
     hidden_layer_dims: List = [12, 4],
     max_episode_steps: int = 999
-):
+    ):
+
+    """
+    @brief Run Deep Deterministic Policy Gradient (DDPG) training and/or evaluation
+           on the MountainCarContinuous-v0 environment.
+
+    This function sets up the Mountain Car environment, creates a DDPG agent, and either:
+    - Trains the agent for a given number of episodes, saving checkpoints and plots, or
+    - Evaluates a previously trained model for a given number of episodes.
+
+    @param train
+        If true, train the agent for `episodes` episodes.
+    @param test
+        If true, evaluate a trained agent for `episodes` episodes.
+    @param episodes
+        Number of episodes to run for training or evaluation.
+    @param render
+        Whether to render the environment during execution (slows training).
+    @param policy_learning_rate
+        Learning rate for the actor (policy) network.
+    @param quality_learning_rate
+        Learning rate for the critic (Q-value) network.
+    @param model_save_path
+        File path to save the trained model (used only if training).
+    @param model_load_path
+        Optional file path to load a pre-trained model (for training continuation or testing).
+    @param plot
+        If true, generate training progress plots (only relevant in training mode).
+    @param hidden_layer_dims
+        List defining the sizes of hidden layers for both actor and critic networks.
+        Default: [12, 4].
+    @param max_episode_steps
+        Maximum number of steps allowed per episode. Default: 999.
+
+    @return
+        None. Side effects include training logs, saved models, evaluation logs,
+        and (optionally) saved training progress plots.
+
+    @throws FileNotFoundError
+        If `test=True` and no model file exists at the provided `model_load_path`
+        or `model_save_path`.
+    """
 
     save_path = Path(model_save_path) if model_save_path else None
     load_path = Path(model_load_path) if model_load_path else None

@@ -41,7 +41,8 @@ class MountainCarDNNAgent:
                  max_episode_steps: int = 500,
                  save_interval: int = 200,
                  polyak_coefficient: float = 0.995,
-                 pure_explore_steps: int = 50):
+                 pure_explore_steps: int = 50,
+                 action_damping_factor: float = 1.0):
 
         self.env = env
 
@@ -57,7 +58,7 @@ class MountainCarDNNAgent:
         self.save_interval = save_interval
         self.max_episode_steps = max_episode_steps
         self.ou_noise = OrnsteinUhlenbeck()
-        self.action_damping = 1.0 # TODO: Make this a parameter
+        self.action_damping = self.action_damping_factor
 
 
         self.graph_update_rate_seconds = 20 # Update graph every 20 seconds
@@ -74,7 +75,6 @@ class MountainCarDNNAgent:
 
             self.save_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # TODO
         # Load existing model if provided
         if isinstance(existing_model_path, str):
             existing_model_path = Path(existing_model_path)
@@ -125,12 +125,34 @@ class MountainCarDNNAgent:
                              next_states: torch.Tensor,
                              terminated: torch.Tensor) -> torch.Tensor:
         """
-        Method for computing DDPG Q-loss
+        @brief Compute the critic (Q-function) loss for DDPG.
+
+        This method calculates the Mean Squared Error (MSE) between the predicted Q-values
+        from the critic network and the Bellman backup target. The target is computed using
+        the target actor-critic networks and the observed rewards.
+
+        @param states
+            Batch of current environment states. Shape: [B, state_dim].
+        @param actions
+            Batch of actions taken in each state. Shape: [B, action_dim].
+        @param rewards
+            Batch of rewards received after taking the actions. Shape: [B, 1] or [B].
+        @param next_states
+            Batch of next environment states observed after taking the actions. Shape: [B, state_dim].
+        @param terminated
+            Batch of done flags indicating whether the episode ended after the transition.
+            Shape: [B, 1] or [B].
+
+        @return
+            A tuple (loss_q, loss_info):
+            - loss_q (torch.Tensor): Scalar critic loss value (MSE).
+            - loss_info (dict): Dictionary with auxiliary logging information,
+              including "QVals" (numpy array of detached Q-values).
         """
-        # TODO: Add doxygen
         q_value = self.ac_net.q(states, actions)
 
         # Bellman backup for Q function
+        # Compute y_i = r_i + \gamma Q_{target}(s_{i+1}, \pi_target(s_{i+1}))
         with torch.no_grad():
             q_pi_targ = self.target_net.q(next_states, self.target_net.pi(next_states))  # [B]
             rewards_1d      = rewards.view(-1)         # or rewards.squeeze(-1)
@@ -149,15 +171,46 @@ class MountainCarDNNAgent:
     def compute_policy_loss(self,
                             states: torch.Tensor) -> torch.Tensor:
         """
-        Method for computing DDPG policy loss
-        """
+        @brief Compute the actor (policy) loss for DDPG.
 
-        # TODO: Add doxygen
+        This method implements the deterministic policy gradient objective for the actor.
+        The actor seeks to maximize the expected Q-value of its actions:
+            J(θ) = E[ Q(s, πθ(s)) ].
+        Since optimizers perform gradient descent, the loss is defined as:
+            L_actor(θ) = - E[ Q(s, πθ(s)) ],
+        so that minimizing the loss corresponds to maximizing the expected Q-value.
+
+        @param states
+            Batch of environment states used to evaluate the actor policy. Shape: [B, state_dim].
+
+        @return
+            Scalar tensor containing the actor loss (torch.Tensor).
+            Minimization of this loss via backpropagation updates the policy parameters
+            in the direction of the deterministic policy gradient.
+        """
 
         return -self.ac_net.q(states, self.ac_net.pi(states)).mean()
 
     def get_optimizer(self, optimizer: str, model_parameters, lr: float):
-        # TODO: Add doxygen
+        """
+        @brief Create and return a PyTorch optimizer.
+
+        This method initializes a PyTorch optimizer for the given model parameters
+        based on the optimizer type specified. Currently supports Adam and SGD.
+
+        @param optimizer
+            Name of the optimizer to use. Supported values: "adam", "sgd" (case-insensitive).
+        @param model_parameters
+            Iterable of model parameters to be optimized (e.g., model.parameters()).
+        @param lr
+            Learning rate for the optimizer.
+
+        @return
+            A torch.optim.Optimizer instance corresponding to the requested optimizer.
+
+        @throws ValueError
+            If an unsupported optimizer name is provided.
+        """
         optimizer = optimizer.lower()
         if optimizer == "adam":
             return optim.Adam(model_parameters, lr=lr)
@@ -193,19 +246,35 @@ class MountainCarDNNAgent:
     def optimize(self,
                  mini_batch: Tuple[List[Tensor], List[Tensor], List[Tensor], List[float], List[bool]]) -> None:
         """
-        @brief Performs a single optimization step on the policy DQN using a mini-batch of experiences.
+        @brief Perform a single optimization step for the actor-critic networks (DDPG).
 
-        Computes the loss between the predicted Q-values from the policy network and the target Q-values
-        estimated using the Bellman equation. Supports both standard DQN and Double DQN update strategies.
+        This method updates both the critic (Q-network) and the actor (policy network)
+        using a mini-batch of experience transitions. It first computes the critic loss
+        via the Bellman backup and performs a gradient descent step on the Q-network.
+        Then it updates the actor by maximizing the Q-value of its actions through
+        the deterministic policy gradient. Finally, the target networks are updated
+        using Polyak averaging.
 
-        @param mini_batch A tuple containing five elements:
-                        - states: List of tensors representing current states.
-                        - actions: List of integers representing actions taken.
-                        - new_states: List of tensors representing resulting states.
-                        - rewards: List of floats representing rewards received.
-                        - terminations: List of booleans indicating if the episode terminated.
+        @param mini_batch
+            A tuple containing five lists corresponding to sampled transitions:
+            - states: List[Tensor], current environment states.
+            - actions: List[Tensor] or List[int], actions taken in each state.
+            - new_states: List[Tensor], next states resulting from actions.
+            - rewards: List[float], rewards received after taking actions.
+            - terminations: List[bool], flags indicating if an episode ended.
 
-        @return None
+        @return
+            None. Updates are applied in-place to the actor, critic, and target networks.
+
+        @details
+            The optimization proceeds in three stages:
+            1. **Critic update**: Minimize the MSE between predicted Q-values and Bellman targets.
+            2. **Actor update**: Maximize the critic’s Q-value estimate for the actor’s actions
+               by minimizing the negative Q-value loss.
+            3. **Target network update**: Slowly update target actor-critic networks using Polyak
+               averaging with factor `self.polyak`.
+
+            Gradient clipping is applied to both networks for stability.
         """
 
         # Transpose the list of experiences and separate each element
@@ -231,7 +300,10 @@ class MountainCarDNNAgent:
         #     f"terminations: {terminations.shape}"
         # )
 
+
+        # Page 5 of https://arxiv.org/pdf/1509.02971 for a good reference
         # First run one gradient descent step for Q.
+        # Updates the critic by minimizing the loss
         self.q_optimizer.zero_grad()
         loss_q, loss_info = self.compute_quality_loss(states, actions, rewards, new_states, terminations)
         loss_q.backward()
@@ -266,7 +338,49 @@ class MountainCarDNNAgent:
 
     def train(self,
               num_episodes: int):
+        """
+        @brief Train the actor-critic agent using the DDPG algorithm.
 
+        Executes training for a specified number of episodes by interacting with the
+        environment, storing transitions in replay memory, and updating both actor and
+        critic networks. Supports an initial pure exploration phase before learning begins.
+
+        @param num_episodes
+            Number of training episodes to run.
+
+        @return
+            None. Training updates are applied in-place, and the learned model is saved
+            periodically as well as at the end of training.
+
+        @details
+            The training loop proceeds as follows:
+            1. **Pure exploration**:
+               - For the first `self.pure_explore_steps` episodes, the agent acts randomly
+                 (with added Ornstein-Uhlenbeck noise) to encourage exploration.
+               - If `pure_explore_steps >= num_episodes`, it is reset to 20% of `num_episodes`.
+            2. **Episode rollout**:
+               - Reset environment and noise process at the beginning of each episode.
+               - At each step, select an action with optional exploration noise.
+               - Execute action in the environment, collect reward, next state, and termination flag.
+               - Store both step transitions and episode transitions into replay memory.
+               - If the episode ends in termination, push the last 20% of transitions (or all if < 200 steps)
+                 into a separate success buffer.
+            3. **Optimization**:
+               - Once replay memory contains more samples than `self.batch_size` and pure exploration
+                 has ended, sample minibatches and perform gradient updates via `self.optimize()`.
+               - Both critic and actor are updated, and target networks are Polyak-averaged.
+            4. **Logging and checkpointing**:
+               - Log per-episode rewards and termination events.
+               - Update training graphs periodically every `self.graph_update_rate_seconds` seconds.
+               - Save the model whenever a new best reward is achieved, at regular intervals
+                 (`self.save_interval`), and at the end of training.
+            5. **Noise scheduling**:
+               - Decay Ornstein-Uhlenbeck noise sigma after each episode.
+
+            The method tracks cumulative rewards per episode and saves the final trained
+            model to `self.save_path`.
+        """
+        
         logger.info(f"Beginning training for {num_episodes} episodes.")
         if self.pure_explore_steps >= num_episodes:
             self.pure_explore_steps = int(0.2 * num_episodes)
@@ -401,6 +515,34 @@ class MountainCarDNNAgent:
         plt.close(fig)
 
     def evaluate(self, num_episodes: int):
+        """
+        @brief Evaluate the current actor policy over multiple episodes.
+
+        Runs the actor network in evaluation mode for a specified number of episodes
+        without exploration noise. For each episode, the environment is reset, and the
+        policy selects actions deterministically until termination or until the maximum
+        episode length is reached. Tracks cumulative rewards and termination flags.
+
+        @param num_episodes
+            Number of evaluation episodes to run.
+
+        @return
+            None. Logs per-episode rewards and termination status, and reports the mean
+            reward across all evaluation episodes.
+
+        @details
+            - The actor network is switched to evaluation mode (`self.ac_net.eval()`).
+            - Ornstein-Uhlenbeck noise is reset at the start of each episode but not applied
+              to actions during evaluation (`induce_noise=False`).
+            - For each step, the actor selects an action deterministically via
+              `self.get_action(state, random=False, induce_noise=False)`.
+            - Episodes terminate either when the environment signals termination or when the
+              maximum episode length (`self.max_episode_steps`) is reached.
+            - Rewards are accumulated per episode, and both rewards and termination flags are
+              stored for logging.
+            - After evaluation, mean reward across episodes is computed and logged.
+        """
+
         logger.info(f"Beginning evaluation: {num_episodes} episodes")
         self.ac_net.eval()
         logger.debug(f"Evaluation mode enabled.")
@@ -435,8 +577,25 @@ class MountainCarDNNAgent:
 
     def _normalize_state(self, state: np.ndarray) -> np.ndarray:
         """
-        Mapping the values to the range [-1, 1]
+        @brief Normalize an observation state to the range [-1, 1].
+
+        Maps the raw environment observation values from their original range
+        defined by the environment’s observation space `[low, high]` into a
+        normalized range of [-1, 1].
+
+        @param state
+            Raw state observation as a NumPy array. Shape matches the environment’s
+            observation space.
+
+        @return
+            Normalized state as a NumPy array with values scaled to the range [-1, 1].
+
+        @details
+            The normalization is performed in two steps:
+            1. Shift and scale to map `[low, high]` → [0, 1].
+            2. Linearly transform [0, 1] → [-1, 1].
         """
+
         low, high = self.env.observation_space.low, self.env.observation_space.high
         norm01 = (state - low) / (high - low)  # [0..1]
         return norm01 * 2.0 - 1.0               # now in [-1..+1]
