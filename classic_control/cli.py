@@ -2,6 +2,7 @@ import click
 from common.loggerConfig import logger
 from classic_control.mountain_car.main import run as run_mountain_car
 from classic_control.mountain_car.main import run_ddpg as run_mountain_car_ddpg
+from classic_control.mountain_car.main import run_a2c as run_mountain_car_a2c
 
 @click.group()
 def cli():
@@ -137,4 +138,99 @@ def mountain_car_ddpg(train,
         plot=plot,
         hidden_layer_dims=list(hidden_layers),
         max_episode_steps=max_episode_steps
+    )
+
+@cli.command()
+@click.option('--train', is_flag=True, help='Run training mode')
+@click.option('--test', is_flag=True, help='Run test mode')
+@click.option('--model-save-path', default='models/classic_control/mountain_car_a2c.pt', help='Where to save the model (base path, no extension)')
+@click.option('--model-load-path', help='Path to load model from, required in test-only mode')
+@click.option('--render', is_flag=True, help='Render the environment')
+@click.option('--episodes', type=int, required=True, help='Maximum number of episodes to run (training)')
+@click.option('--hidden-layers', multiple=True, type=int, default=(16, 16),
+              help="List of integers for number of nodes in each hidden layer.")
+@click.option('--max-episode-steps', type=int, default=500,
+              help='Maximum number of steps per episode (default: 1000).')
+@click.option('--n-steps', type=int, default=32, help='Number of rollout steps before each update')
+@click.option('--gamma', type=float, default=0.99, help='Discount factor')
+@click.option('--lam', type=float, default=0.95, help='GAE lambda for advantage estimation')
+@click.option('--ent-coef', type=float, default=1e-3, help='Entropy bonus coefficient')
+@click.option('--vf-coef', type=float, default=0.5, help='Value function loss coefficient')
+@click.option('--max-grad-norm', type=float, default=0.5, help='Maximum gradient norm (clipping)')
+@click.option('--actor-lr', type=float, default=3e-4, help='Learning rate for actor')
+@click.option('--critic-lr', type=float, default=3e-4, help='Learning rate for critic')
+@click.option('--optimizer', type=click.Choice(['adam', 'adamw', 'sgd', 'rmsprop']), default='adam', help='Optimizer type')
+@click.option('--device', type=str, default=None, help='Device to run on (cpu or cuda)')
+@click.option('--seed', type=int, default=None, help='Random seed')
+@click.option('--normalize-advantages/--no-normalize-advantages', default=True, help='Enable/disable advantage normalization')
+@click.option('--eval-every', type=int, default=25, help='Evaluate every N episodes during training')
+@click.option('--save-every', type=int, default=50, help='Save a checkpoint every N episodes during training')
+@click.option('--log-every', type=int, default=1, help='Log training stats every N episodes')
+@click.option('--num-eval-episodes', type=int, default=5, help='Number of episodes per evaluation pass')
+def mountain_car_a2c(train,
+                     test,
+                     model_save_path,
+                     model_load_path,
+                     render,
+                     episodes,
+                     hidden_layers,
+                     max_episode_steps,
+                     n_steps,
+                     gamma,
+                     lam,
+                     ent_coef,
+                     vf_coef,
+                     max_grad_norm,
+                     actor_lr,
+                     critic_lr,
+                     optimizer,
+                     device,
+                     seed,
+                     normalize_advantages,
+                     eval_every,
+                     save_every,
+                     log_every,
+                     num_eval_episodes):
+    """
+    Run Advantage Actor-Critic (A2C) on MountainCarContinuous-v0.
+    """
+
+    if not train and not test:
+        raise click.UsageError("Specify either --train or --train to proceed.")
+
+    if test and not train:
+        if not model_load_path:
+            raise click.UsageError("--model-load-path is required when using --test.")
+
+
+    if not train and model_save_path:
+        model_save_path = None
+    elif train and not model_save_path.endswith('.pt'):
+        model_save_path += '.pt'
+
+    run_mountain_car_a2c(
+        train=train,
+        test=test,
+        model_save_path=model_save_path,
+        model_load_path=model_load_path,
+        max_episode_steps=max_episode_steps,
+        hidden_layers=hidden_layers,
+        render=render,
+        n_steps=n_steps,
+        gamma=gamma,
+        lam=lam,
+        ent_coef=ent_coef,
+        vf_coef=vf_coef,
+        max_grad_norm=max_grad_norm,
+        actor_lr=actor_lr,
+        critic_lr=critic_lr,
+        optimizer=optimizer,
+        device=device,
+        seed=seed,
+        normalize_advantages=normalize_advantages,
+        max_episodes=episodes,
+        eval_every=eval_every,
+        save_every=save_every,
+        log_every=log_every,
+        num_eval_episodes=num_eval_episodes,
     )

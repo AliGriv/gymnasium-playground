@@ -2,11 +2,12 @@ from tqdm import tqdm
 from classic_control.mountain_car.mountainCarAgent import *
 from classic_control.mountain_car.mountainCarContAgent import *
 from classic_control.mountain_car.mountainCarDdpg import *
+from classic_control.mountain_car.mountainCarA2C import *
 from matplotlib import pyplot as plt
 from pathlib import Path
 import common.utils as utils
 from common.loggerConfig import logger
-from typing import List
+from typing import List, Sequence, Optional
 
 
 def run(
@@ -311,3 +312,198 @@ def run_ddpg(
             num_episodes=episodes
         )
         logger.info("Testing complete.")
+
+def run_a2c(
+    train: bool,
+    test: bool,
+    model_save_path: str,
+    model_load_path: Optional[str] = None,
+    max_episode_steps: int = 1000,
+    hidden_layers: Sequence[int] = (16, 16),
+    render: bool = False,
+    n_steps: int = 32,
+    gamma: float = 0.99,
+    lam: float = 0.95,
+    ent_coef: float = 1e-3,
+    vf_coef: float = 0.5,
+    max_grad_norm: float = 0.5,
+    actor_lr: float = 3e-4,
+    critic_lr: float = 3e-4,
+    optimizer: str = "adam",
+    device: Optional[str] = None,
+    seed: Optional[int] = None,
+    normalize_advantages: bool = True,
+    max_episodes: int = 500,
+    eval_every: int = 25,
+    save_every: int = 50,
+    log_every: int = 1,
+    num_eval_episodes: int = 5,
+):
+    r"""
+    @brief Run A2C on MountainCarContinuous-v0 in train and/or test mode.
+
+    Creates the environment, constructs a `MountainCarA2CAgent`, and runs either
+    training or evaluation based on the input flags. Periodically logs progress
+    and saves checkpoints during training; always saves a final checkpoint.
+
+    @param train                 If True, train a model.
+    @param test                  If True, evaluate a model (deterministic policy).
+    @param model_save_path       Base path (without extension) to save checkpoints (.pt/.json).
+    @param model_load_path       Base path (without extension) to load a saved model (.pt/.json).
+                                 Required for `test=True` unless a model is produced by the same run with `train=True`
+                                 and a valid `model_save_path`.
+    @param max_episode_steps     Maximum steps per episode (passed to agent).
+    @param hidden_layers         Hidden layer sizes for both actor and critic.
+    @param render                If True, render the environment.
+    @param n_steps               On-policy rollout horizon per update.
+    @param gamma                 Discount factor.
+    @param lam                   GAE lambda for advantage estimation.
+    @param ent_coef              Entropy bonus coefficient.
+    @param vf_coef               Value loss coefficient.
+    @param max_grad_norm         Global gradient clipping norm.
+    @param actor_lr              Learning rate for actor optimizer.
+    @param critic_lr             Learning rate for critic optimizer.
+    @param optimizer             Optimizer name ("adam", "adamw", "sgd", "rmsprop").
+    @param device                'cuda' or 'cpu'. Auto-selects if None.
+    @param seed                  Optional RNG seed.
+    @param normalize_advantages  Normalize per-batch advantages during updates.
+    @param max_episodes          Maximum number of training episodes.
+    @param eval_every            Evaluate every N episodes during training (0 disables).
+    @param save_every            Save a checkpoint every N episodes during training (0 disables).
+    @param log_every             Log training stats every N episodes.
+    @param num_eval_episodes     Number of episodes for each evaluation pass.
+    """
+
+    logger.info(f"=== Running Mountain Car A2C with parameters: ===")
+    logger.info(f"train={train} | test={test} | \n"
+            f"model_save_path={model_save_path} | model_load_path={model_load_path} | \n"
+            f"max_episode_steps={max_episode_steps} | hidden_layers={hidden_layers} | \n"
+            f"n_steps={n_steps} | gamma={gamma} | lam={lam} | ent_coef={ent_coef} | \n"
+            f"vf_coef={vf_coef} | max_grad_norm={max_grad_norm} | actor_lr={actor_lr} | \n"
+            f"critic_lr={critic_lr} | optimizer={optimizer} | device={device} | seed={seed} | \n"
+            f"normalize_advantages={normalize_advantages} | max_episodes={max_episodes} | \n"
+            f"eval_every={eval_every} | save_every={save_every} | log_every={log_every} | \n"
+            f"num_eval_episodes={num_eval_episodes} | render={render}")
+    # ----- Validate flags/paths -----
+    save_base = Path(model_save_path) if model_save_path else None
+    load_base = Path(model_load_path) if model_load_path else None
+
+    if not train and not test:
+        raise ValueError("At least one of 'train' or 'test' must be True.")
+
+    if test and not train:
+        # pure test run requires an explicit load path
+        if load_base is None:
+            raise ValueError("`model_load_path` is required when test=True and train=False.")
+        if not load_base.with_suffix(".pt").exists() or not load_base.with_suffix(".json").exists():
+            raise FileNotFoundError(f"Model to test not found at base: {load_base}")
+
+    if train and save_base is None:
+        raise ValueError("`model_save_path` is required when train=True.")
+
+    # ----- Env creation -----
+    env = gym.make('MountainCarContinuous-v0', render_mode="human" if render else None)
+
+    # Optional seeding (Gym/Gymnasium compatibility)
+    if seed is not None:
+        try:
+            env.reset(seed=seed)
+        except TypeError:
+            env.seed(seed)
+
+    # ----- Agent creation (load or fresh) -----
+    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+
+    if train:
+        # Fresh or resume-from-checkpoint training
+        if load_base is not None and load_base.with_suffix(".pt").exists() and load_base.with_suffix(".json").exists():
+            logger.info(f"[run_a2c] Loading existing model for training from: {load_base}")
+            agent = MountainCarA2CAgent(
+                env=env,
+                save_path=save_base,
+                existing_model_path=load_base,
+                n_steps=n_steps,
+                gamma=gamma,
+                lam=lam,
+                hidden_layers=hidden_layers,
+                activation=nn.ReLU,
+                ent_coef=ent_coef,
+                vf_coef=vf_coef,
+                max_grad_norm=max_grad_norm,
+                actor_lr=actor_lr,
+                critic_lr=critic_lr,
+                optimizer=optimizer,
+                device=device,
+                seed=seed,
+                normalize_advantages=normalize_advantages,
+                max_steps_per_episode=max_episode_steps,
+            )
+        else:
+            logger.info("[run_a2c] Creating a new model for training.")
+            agent = MountainCarA2CAgent(
+                env=env,
+                save_path=save_base,
+                existing_model_path=None,
+                n_steps=n_steps,
+                gamma=gamma,
+                lam=lam,
+                hidden_layers=hidden_layers,
+                activation=nn.ReLU,
+                ent_coef=ent_coef,
+                vf_coef=vf_coef,
+                max_grad_norm=max_grad_norm,
+                actor_lr=actor_lr,
+                critic_lr=critic_lr,
+                optimizer=optimizer,
+                device=device,
+                seed=seed,
+                normalize_advantages=normalize_advantages,
+                max_steps_per_episode=max_episode_steps,
+            )
+
+        # ----- Train -----
+        logger.info(f"[run_a2c] Starting training for up to {max_episodes} episodes.")
+        agent.train(
+            max_episodes=max_episodes,
+            eval_every=eval_every,
+            save_every=save_every,
+            log_every=log_every
+        )
+
+        # After training, if test is also requested, reuse the trained agent to evaluate.
+        if test:
+            logger.info("[run_a2c] Evaluating the newly trained model.")
+            agent.evaluate(num_episodes=num_eval_episodes)
+        else:
+            logger.info("[run_a2c] Training finished.")
+
+    else:
+        # ----- Pure evaluation mode -----
+        logger.info(f"[run_a2c] Loading model for evaluation from: {load_base}")
+        agent = MountainCarA2CAgent(
+            env=env,
+            save_path=load_base,                 # not used for saving in pure eval, but required by constructor
+            existing_model_path=load_base,
+            n_steps=n_steps,
+            gamma=gamma,
+            lam=lam,
+            hidden_layers=hidden_layers,
+            activation=nn.ReLU,
+            ent_coef=ent_coef,
+            vf_coef=vf_coef,
+            max_grad_norm=max_grad_norm,
+            actor_lr=actor_lr,
+            critic_lr=critic_lr,
+            optimizer=optimizer,
+            device=device,
+            seed=seed,
+            normalize_advantages=normalize_advantages,
+            max_steps_per_episode=max_episode_steps,
+        )
+        agent.evaluate(num_episodes=num_eval_episodes, render=render)
+
+    # Clean up env if needed
+    try:
+        env.close()
+    except Exception:
+        pass
