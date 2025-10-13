@@ -1,4 +1,5 @@
 import json
+import math
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import Sequence, Type, Union, Dict, Any, Optional
@@ -28,8 +29,9 @@ class A2CActor(nn.Module):
                  hidden_dims: Sequence[int] = (128, 128),
                  activation: Type[nn.Module] = nn.ReLU,
                  action_limit: float = 1.0,
-                 log_std_init: float = 0.01,
-                 log_std_bounds = (-5.0, 2.0),
+                 log_std_init: float = 0.20,
+                 log_std_bounds = (-2.0, 2.0),
+                 squash_tau: float = 0.5,
                  device: str = None):
         super().__init__()
         self.action_limit = float(action_limit)
@@ -48,24 +50,22 @@ class A2CActor(nn.Module):
         # Keep a cached device string consistent with Dnn
         self.device = self.mu_net.device
 
-    def _make_dist(self, state: torch.Tensor) -> TransformedDistribution:
+        self.squash_tau = squash_tau
+
+    def _make_dist(self, state: torch.Tensor):
         state = state.to(self.device)
-        mu = self.mu_net(state)  # [B, A]
-
-        # Clamp log_std for numerical stability, then broadcast to batch
+        mu = self.mu_net(state)
         log_std = torch.clamp(self.log_std, *self.log_std_bounds)
-        std = torch.exp(log_std).expand_as(mu)  # [B, A]
-
-        base = Normal(mu, std)  # unbounded
-        # Tanh to (-1,1), then scale to [-action_limit, action_limit]
-        transforms = [TanhTransform(cache_size=1), AffineTransform(loc=0.0, scale=self.action_limit)]
-        return TransformedDistribution(base, transforms), mu, log_std.expand_as(mu)
+        std = torch.exp(log_std).expand_as(mu)
+        base = Normal(mu, std)
+        return base, mu, log_std.expand_as(mu)
 
     @torch.no_grad()
-    def act(self, state: torch.Tensor) -> torch.Tensor:
-        """Sample action for environment interaction (no grads)."""
-        dist, _, _ = self._make_dist(state)
-        return dist.sample()
+    def act(self, state: torch.Tensor):
+        base, _, _ = self._make_dist(state)
+        a_raw = base.rsample()
+        a = torch.tanh(a_raw / self.squash_tau) * self.action_limit
+        return a, a_raw
 
     @torch.no_grad()
     def act_deterministic(self, state: torch.Tensor) -> torch.Tensor:
@@ -75,30 +75,62 @@ class A2CActor(nn.Module):
         """
         state = state.to(self.device)
         mu = self.mu_net(state)
-        return torch.tanh(mu) * self.action_limit
+        return torch.tanh(mu / self.squash_tau) * self.action_limit
 
     def forward(self, state: torch.Tensor):
         """
         Returns:
-            action:      reparameterized sample a ~ pi(.|state)       [B, A]
-            log_prob:    log pi(a|state), summed over action dims     [B, 1]
-            entropy_appx: entropy of base Normal (approximation)      [B, 1]
+            action:       tanh-τ transformed action in [-action_limit, action_limit]   [B, A]
+            log_prob:     log π(a|s) with change-of-variables correction               [B, 1]
+            entropy_appx: entropy approximation of base Normal                         [B, 1]
         """
-        dist, mu, log_std = self._make_dist(state)
+        # ---- guards & setup ----
+        assert getattr(self, "squash_tau", 1.0) > 0.0, "squash_tau must be > 0"
+        eps = 1e-6
+        dev = self.device if hasattr(self, "device") else state.device
+        L  = torch.as_tensor(float(self.action_limit), device=dev)
+        tau = torch.as_tensor(float(self.squash_tau), device=dev)
 
-        # Reparameterized sample so grads flow through mu/log_std
-        action = dist.rsample()
-        log_prob = dist.log_prob(action).sum(dim=-1, keepdim=True)
+        # Build base Normal(μ, σ)
+        dist, mu, log_std = self._make_dist(state)  # log_std should already be shaped like mu
+        # (Optional sanity checks; comment out in production)
+        # assert torch.isfinite(mu).all() and torch.isfinite(log_std).all(), "mu/log_std not finite"
 
-        # Approximate entropy with base Normal (simple & common)
-        base_entropy = (0.5 + 0.5 * torch.log(torch.tensor(2.0 * torch.pi, device=self.device)) + log_std).sum(-1, keepdim=True)
+        # ---- sample (reparam) in base space ----
+        a_raw = dist.rsample()                            # [B, A], unbounded
+        z = a_raw / tau                                   # temperature scaling
+        t = torch.tanh(z)                                 # [-1, 1]
+        action = t * L                                    # [-L, L]
+
+        # ---- log-prob with correct Jacobian ----
+        # log π_base(a_raw)
+        logp_base = dist.log_prob(a_raw)                  # [B, A]
+
+        # Jacobian per-dim: |da/du| = (L/τ) * (1 - tanh^2(u/τ))
+        # => log|da/du| = log(1 - tanh^2(z)) + log(L) - log(τ)
+        log_jac_per_dim = torch.log1p(-t.pow(2) + eps) + torch.log(L) - torch.log(tau)  # [B, A]
+
+        # Corrected log-prob over all dims
+        log_prob = (logp_base - log_jac_per_dim).sum(dim=-1, keepdim=True)              # [B, 1]
+
+        # ---- entropy approximation (base Normal) ----
+        # H(N(μ, σ)) per dim = 0.5 * log(2πe) + log σ
+        base_entropy = (0.5 + 0.5 * math.log(2.0 * math.pi) + log_std).sum(-1, keepdim=True)  # [B, 1]
+        # If you want the numerically correct constant shift for reporting (no grad impact):
+        # base_entropy = base_entropy + a_raw.size(-1) * (torch.log(L) - torch.log(tau))
 
         return action, log_prob, base_entropy
 
-    def distribution(self, state: torch.Tensor) -> TransformedDistribution:
-        """Expose the action distribution if you need it."""
-        dist, _, _ = self._make_dist(state)
-        return dist
+    def distribution(self, state: torch.Tensor):
+        base, _, _ = self._make_dist(state)
+        T = torch.distributions.transforms
+        transforms = [
+            T.AffineTransform(loc=0., scale=1./self.squash_tau),  # u -> u/τ
+            T.TanhTransform(),
+            T.AffineTransform(loc=0., scale=self.action_limit),   # -> [-limit, limit]
+        ]
+        return torch.distributions.TransformedDistribution(base, transforms)
+
 
 class A2CCritic(nn.Module):
     r"""

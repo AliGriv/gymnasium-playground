@@ -35,7 +35,7 @@ class MountainCarA2CAgent:
                  lam: float = 0.95,
                  hidden_layers: Sequence[int] = (16, 16),
                  activation: Type[nn.Module] = nn.ReLU,
-                 ent_coef: float = 1e-3,
+                 ent_coef: float = 1e-2,
                  vf_coef: float = 0.5,
                  max_grad_norm: float = 0.5,
                  actor_lr: float = 3e-4,
@@ -286,19 +286,15 @@ class MountainCarA2CAgent:
         # Build the current policy distribution
         dist = self.a2c.actor.distribution(states)
 
-        # Keep actions strictly inside (-limit, limit) to avoid -inf log-probs
+        # No need to clamp actions - tanh actor already produces bounded actions
         eps = 1e-6
-        a_lim = float(self.a2c.actor.action_limit)
-        safe_actions = torch.clamp(actions, -a_lim, a_lim) * (1.0 - eps)
+        lim = self.a2c.actor.action_limit
+        logp = dist.log_prob(actions.clamp(-lim + eps, lim - eps)).sum(dim=-1, keepdim=True)  # [B,1]
 
-        # Log π(a|s) (sum over action dims)
-        logp = dist.log_prob(safe_actions).sum(dim=-1, keepdim=True)  # [B,1]
+        # Entropy approximation from actor
+        _, _, entropy_per_sample = self.a2c.actor(states)  # [B,1]
 
-        # Entropy approximation from actor (returns per-sample entropy tensor)
-        # This keeps gradients through log_std as desired.
-        _, _, entropy_per_sample = self.a2c.actor(states)             # [B,1]
-
-        # Policy gradient term (advantages treated as constants)
+        # Policy gradient term
         policy_loss = -(logp * advantages.detach()).mean()
         entropy = entropy_per_sample.mean()
 
@@ -401,30 +397,34 @@ class MountainCarA2CAgent:
         norm_adv = self.normalize_advantages if normalize_advantages is None else bool(normalize_advantages)
 
         # ---- 1) Collate ----
-        states = torch.stack([s.to(self.device).float() for s in mini_batch[0]], dim=0)       # [B, S]
-        # Robust action collation (handles tensors or numeric types)
+        states = torch.stack([s.to(self.device).float() for s in mini_batch[0]], dim=0)
         if isinstance(mini_batch[1][0], torch.Tensor):
-            actions = torch.stack([a.to(self.device).float() for a in mini_batch[1]], dim=0)  # [B, A]
+            actions = torch.stack([a.to(self.device).float() for a in mini_batch[1]], dim=0)
         else:
             actions = torch.tensor(mini_batch[1], dtype=torch.float32, device=self.device)
             if actions.dim() == 1:
                 actions = actions.unsqueeze(-1)
-        next_states = torch.stack([s.to(self.device).float() for s in mini_batch[2]], dim=0)  # [B, S]
-        rewards = torch.tensor(mini_batch[3], dtype=torch.float32, device=self.device).unsqueeze(-1)  # [B,1]
-        terminations = torch.tensor(mini_batch[4], dtype=torch.float32, device=self.device).unsqueeze(-1)    # [B,1]
+        next_states = torch.stack([s.to(self.device).float() for s in mini_batch[2]], dim=0)
+        rewards = torch.tensor(mini_batch[3], dtype=torch.float32, device=self.device).unsqueeze(-1)
+        terminations = torch.tensor(mini_batch[4], dtype=torch.float32, device=self.device).unsqueeze(-1)
 
         B = states.size(0)
 
-        # ---- 2) Values & bootstrap ----
-        values = self.compute_values(states)                                  # [B,1]
+        # ---- 2) Values & FIXED bootstrap ----
         with torch.no_grad():
-            last_value = self.compute_values(next_states[-1:].contiguous())   # [1,1]
+            values = self.compute_values(states)
+            # CRITICAL FIX: Proper bootstrap value computation
+            if mini_batch[4][-1]:  # Last transition was a real termination
+                last_value = torch.zeros(1, 1, device=self.device)
+            else:  # Episode timed out, need to bootstrap from final state
+                last_value = self.compute_values(next_states[-1:])  # Use final state, not next_state
 
-        # ---- 3) Returns & advantages ----
-        with torch.no_grad():
-            returns = self.compute_returns(rewards, terminations, last_value)        # [B,1]
-            advantages = self.compute_advantages(rewards, values, terminations, last_value)  # [B,1]
-            if norm_adv and B > 1:
+            # ---- 3) Returns & advantages ----
+            returns = self.compute_returns(rewards, terminations, last_value)
+            advantages = self.compute_advantages(rewards, values, terminations, last_value)
+
+            # IMPROVED: Always normalize advantages if we have more than 1 sample
+            if norm_adv and B > 0:  # Changed from B > 1 to B > 0
                 adv_mean = advantages.mean()
                 adv_std = advantages.std(unbiased=False).clamp_min(1e-8)
                 advantages = (advantages - adv_mean) / adv_std
@@ -450,10 +450,9 @@ class MountainCarA2CAgent:
                 max_norm=max_grad_norm
             )
 
-        self.critic_optimizer.step()
+        self.actor_optimizer.step()
         self.critic_optimizer.step()
 
-        # Return Python floats
         return {
             "policy_loss": losses["policy_loss"].item(),
             "value_loss": losses["value_loss"].item(),
@@ -461,9 +460,9 @@ class MountainCarA2CAgent:
             "total_loss": total_loss.item(),
         }
 
-    # ------------------------------------------------------------------ #
+    # --------------------------------------------------------------------#
     #                           Save helper                               #
-    # ------------------------------------------------------------------ #
+    # --------------------------------------------------------------------#
     def _save_checkpoint(self, base_path: Optional[Path] = None, extra: Optional[Dict[str, Any]] = None) -> None:
         r"""
         @brief Save model weights and metadata to disk.
@@ -485,6 +484,7 @@ class MountainCarA2CAgent:
     # ------------------------------------------------------------------ #
     #                            Evaluation                               #
     # ------------------------------------------------------------------ #
+    @logger.catch
     @torch.no_grad()
     def evaluate(self, num_episodes: int = 5) -> Dict[str, float]:
         r"""
@@ -518,11 +518,12 @@ class MountainCarA2CAgent:
                 ep_ret += float(reward)
                 ep_len += 1
 
-                if done or ep_len >= self.max_steps_per_episode:
+                if done:
                     break
 
                 obs_t = torch.as_tensor(next_obs, dtype=torch.float32, device=self.device)
 
+            logger.debug(f"[Eval] Episode {ep+1} | Return: {ep_ret:.3f} | Length: {ep_len}")
             returns.append(ep_ret)
             lengths.append(ep_len)
 
@@ -535,6 +536,7 @@ class MountainCarA2CAgent:
     # ------------------------------------------------------------------ #
     #                              Training                               #
     # ------------------------------------------------------------------ #
+    @logger.catch
     def train(self,
               max_episodes: int,
               *,
@@ -580,9 +582,13 @@ class MountainCarA2CAgent:
 
             for t in range(self.max_steps_per_episode):
                 # Stochastic action during training
-                action_t = self.a2c.act(self._normalize_state(obs_t).unsqueeze(0)).squeeze(0)  # [action_dim]
-                # logger.debug(f"\t \t Step {t} | Action: {action_t}")
+                action_t, raw_action_t = self.a2c.act(self._normalize_state(obs_t).unsqueeze(0))
+
+                # logger.debug(f"\t \t Step {t} | Raw action: {raw_action_t.cpu().numpy()} | Clipped action: {action_t.cpu().numpy()}")
+
+                action_t = action_t.squeeze(0)  # [action_dim]
                 action = action_t.detach().cpu().numpy()
+                # logger.debug(f"\t \t Step {t} | Action: {action}")
 
                 next_obs, reward, terminated, truncated, info = self.env.step(action)
                 done = bool(terminated)
@@ -600,6 +606,11 @@ class MountainCarA2CAgent:
                 # If we have enough steps or episode ended, optimize on this segment
                 if len(mb_states) >= self.n_steps or done:
                     stats = self.optimize((mb_states, mb_actions, mb_next_states, mb_rewards, mb_dones))
+                    # logger.debug(f"[Train] Ep={episode} | Step={t} | " +
+                    #              f"Loss={stats['total_loss']:.3f} | " +
+                    #              f"Policy={stats['policy_loss']:.3f} | " +
+                    #              f"Value={stats['value_loss']:.3f} | " +
+                    #              f"Entropy={stats['entropy']:.3f}")
                     # Reset the buffers for the next segment within the same episode
                     mb_states.clear()
                     mb_actions.clear()

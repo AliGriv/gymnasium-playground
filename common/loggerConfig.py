@@ -2,6 +2,7 @@ from loguru import logger
 from pathlib import Path
 from datetime import datetime
 import sys
+import traceback
 
 # Ensure logs directory exists
 logs_dir = Path("logs")
@@ -40,6 +41,19 @@ logger.add(
     backtrace=True,
     diagnose=True
 )
+
+# Add exception hook to capture unhandled exceptions
+def exception_handler(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+
+    logger.critical(
+        "Uncaught exception",
+        exc_info=(exc_type, exc_value, exc_traceback)
+    )
+
+sys.excepthook = exception_handler
 
 # Expose logger to be imported
 __all__ = ["logger"]

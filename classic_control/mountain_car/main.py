@@ -333,7 +333,7 @@ def run_a2c(
     device: Optional[str] = None,
     seed: Optional[int] = None,
     normalize_advantages: bool = True,
-    max_episodes: int = 500,
+    num_episodes: int = 500,
     eval_every: int = 25,
     save_every: int = 50,
     log_every: int = 1,
@@ -367,7 +367,7 @@ def run_a2c(
     @param device                'cuda' or 'cpu'. Auto-selects if None.
     @param seed                  Optional RNG seed.
     @param normalize_advantages  Normalize per-batch advantages during updates.
-    @param max_episodes          Maximum number of training episodes.
+    @param num_episodes          Maximum number of training episodes.
     @param eval_every            Evaluate every N episodes during training (0 disables).
     @param save_every            Save a checkpoint every N episodes during training (0 disables).
     @param log_every             Log training stats every N episodes.
@@ -381,7 +381,7 @@ def run_a2c(
             f"n_steps={n_steps} | gamma={gamma} | lam={lam} | ent_coef={ent_coef} | \n"
             f"vf_coef={vf_coef} | max_grad_norm={max_grad_norm} | actor_lr={actor_lr} | \n"
             f"critic_lr={critic_lr} | optimizer={optimizer} | device={device} | seed={seed} | \n"
-            f"normalize_advantages={normalize_advantages} | max_episodes={max_episodes} | \n"
+            f"normalize_advantages={normalize_advantages} | num_episodes={num_episodes} | \n"
             f"eval_every={eval_every} | save_every={save_every} | log_every={log_every} | \n"
             f"num_eval_episodes={num_eval_episodes} | render={render}")
     # ----- Validate flags/paths -----
@@ -462,9 +462,9 @@ def run_a2c(
             )
 
         # ----- Train -----
-        logger.info(f"[run_a2c] Starting training for up to {max_episodes} episodes.")
+        logger.info(f"[run_a2c] Starting training for up to {num_episodes} episodes.")
         agent.train(
-            max_episodes=max_episodes,
+            max_episodes=num_episodes,
             eval_every=eval_every,
             save_every=save_every,
             log_every=log_every
@@ -500,7 +500,7 @@ def run_a2c(
             normalize_advantages=normalize_advantages,
             max_steps_per_episode=max_episode_steps,
         )
-        agent.evaluate(num_episodes=num_eval_episodes, render=render)
+        agent.evaluate(num_episodes=num_episodes)
 
     # Clean up env if needed
     try:
